@@ -154,32 +154,6 @@ func (e *Entity) CanMoveTo(cell *Cell) bool {
 	return !cell.IsOccupied()
 }
 
-// GeminiPrompt represents the structure for a Gemini API request
-type GeminiPrompt struct {
-	Contents []Content `json:"contents"`
-}
-
-// Content represents a content element in the Gemini API request
-type Content struct {
-	Role  string `json:"role"`
-	Parts []Part `json:"parts"`
-}
-
-// Part represents a part element in the Gemini API request
-type Part struct {
-	Text string `json:"text"`
-}
-
-// GeminiResponse represents the structure for a Gemini API response
-type GeminiResponse struct {
-	Candidates []Candidate `json:"candidates"`
-}
-
-// Candidate represents a candidate element in the Gemini API response
-type Candidate struct {
-	Content Content `json:"content"`
-}
-
 // makeDecision represents the entity's decision-making process
 func (e *Entity) makeDecision() {
 	e.mu.Lock()
