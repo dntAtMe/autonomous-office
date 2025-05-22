@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
@@ -28,231 +29,6 @@ type Action struct {
 	Type      ActionType
 	Direction Position
 	Entity    *Entity
-}
-
-// Entity represents an agent in the simulation
-type Entity struct {
-	ID                   int
-	Position             Position
-	Decision             chan Action   // Buffered channel for decisions
-	DecidedActionDisplay string        // Stores the string representation of the action for the current tick
-	LastDecisionTime     time.Duration // Time taken for the last decision
-	IsDeciding           bool          // Flag to track if entity is currently making a decision
-	eventChan            chan Event    // Channel to receive simulation events
-	sim                  *Simulation   // Reference to the simulation
-	mu                   sync.Mutex    // Mutex to protect the entity state
-	isRunning            bool          // Flag to track if the entity is actively running
-	stopSignal           chan bool     // Channel to signal the entity to stop
-}
-
-// NewEntity creates a new entity
-func NewEntity(id int, pos Position) *Entity {
-	return &Entity{
-		ID:                   id,
-		Position:             pos,
-		Decision:             make(chan Action, 1), // Buffer size 1 to avoid blocking
-		DecidedActionDisplay: "--",                 // Initial state
-		eventChan:            make(chan Event, 10), // Buffer for events
-		isRunning:            false,
-		stopSignal:           make(chan bool),
-	}
-}
-
-// Register connects this entity to a simulation
-func (e *Entity) Register(sim *Simulation) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.sim != nil {
-		return fmt.Errorf("entity %d is already registered with a simulation", e.ID)
-	}
-
-	e.sim = sim
-	return sim.RegisterEntity(e)
-}
-
-// Unregister disconnects this entity from its simulation
-func (e *Entity) Unregister() error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.sim == nil {
-		return fmt.Errorf("entity %d is not registered with any simulation", e.ID)
-	}
-
-	// Stop the entity if it's running
-	if e.isRunning {
-		e.Stop()
-	}
-
-	sim := e.sim
-	e.sim = nil
-	return sim.UnregisterEntity(e)
-}
-
-// Start begins the entity's autonomous decision-making loop
-func (e *Entity) Start() {
-	e.mu.Lock()
-	if e.isRunning {
-		e.mu.Unlock()
-		return
-	}
-
-	if e.sim == nil {
-		log.Printf("Entity %d cannot start: not registered with a simulation", e.ID)
-		e.mu.Unlock()
-		return
-	}
-
-	e.isRunning = true
-	e.mu.Unlock()
-
-	go e.run()
-}
-
-// Stop ends the entity's autonomous decision-making loop
-func (e *Entity) Stop() {
-	e.mu.Lock()
-	if !e.isRunning {
-		e.mu.Unlock()
-		return
-	}
-	e.isRunning = false
-	e.mu.Unlock()
-
-	e.stopSignal <- true
-}
-
-// run is the main entity loop
-func (e *Entity) run() {
-	log.Printf("Entity %d started running", e.ID)
-
-	// Main loop
-	for {
-		select {
-		case <-e.stopSignal:
-			log.Printf("Entity %d stopping", e.ID)
-			return
-		case event := <-e.eventChan:
-			e.handleEvent(event)
-		default:
-			// Make a decision if not already deciding
-			e.mu.Lock()
-			isDeciding := e.IsDeciding
-			e.mu.Unlock()
-
-			if !isDeciding {
-				e.makeDecision()
-			}
-
-			// Small sleep to prevent CPU hogging
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-}
-
-// handleEvent processes events from the simulation
-func (e *Entity) handleEvent(event Event) {
-	switch event.GetType() {
-	case EventCellEnter:
-	case EventSimulationTick:
-		// The simulation has ticked, entity might want to update its internal state
-	case EventEntityDecision:
-		// Another entity has made a decision
-	}
-}
-
-// CanMoveTo checks if an entity can move to a given cell
-func (e *Entity) CanMoveTo(cell *Cell) bool {
-	return !cell.IsOccupied()
-}
-
-// makeDecision represents the entity's decision-making process
-func (e *Entity) makeDecision() {
-	e.mu.Lock()
-	if e.IsDeciding {
-		e.mu.Unlock()
-		return
-	}
-	e.IsDeciding = true
-	e.mu.Unlock()
-
-	defer func() {
-		e.mu.Lock()
-		e.IsDeciding = false
-		e.mu.Unlock()
-	}()
-
-	startTime := time.Now()
-
-	// Ensure we have a simulation reference
-	e.mu.Lock()
-	sim := e.sim
-	e.mu.Unlock()
-
-	if sim == nil {
-		log.Printf("Entity %d cannot make a decision: not registered with a simulation", e.ID)
-		return
-	}
-
-	sleepDuration := time.Duration(sim.Rand.Intn(5000)) * time.Millisecond
-	time.Sleep(sleepDuration)
-
-	moves := []Position{
-		{0, 1},
-		{0, -1},
-		{1, 0},
-		{-1, 0},
-	}
-
-	direction := moves[sim.Rand.Intn(len(moves))]
-
-	action := Action{
-		Type:      ActionMove,
-		Direction: direction,
-		Entity:    e,
-	}
-
-	e.LastDecisionTime = time.Since(startTime)
-	log.Printf("Entity %d decided in %v", e.ID, e.LastDecisionTime)
-
-	// Send the decision to the simulation
-	decisionEvent := EntityDecisionEvent{
-		Entity: e,
-		Action: action,
-	}
-
-	sim.PublishEvent(decisionEvent)
-}
-
-// HandleCellEvent processes notifications about cell events
-func (e *Entity) HandleCellEvent(event CellEvent) {
-	// For now, entities ignore these events.
-	// This is kept for backward compatibility and can dispatch to the new event handler
-	e.handleEvent(event)
-}
-
-// FormatActionForDisplay converts an Action to a short string representation
-func FormatActionForDisplay(action Action) string {
-	switch action.Type {
-	case ActionMove:
-		switch action.Direction {
-		case Position{0, 1}: // Up
-			return "UP"
-		case Position{0, -1}: // Down
-			return "DW"
-		case Position{-1, 0}: // Left
-			return "LT"
-		case Position{1, 0}: // Right
-			return "RT"
-		default:
-			return "M?" // Unknown move direction
-		}
-	case ActionWait:
-		return "ST" // Stay
-	default:
-		return "--" // Unknown action type
-	}
 }
 
 // Grid represents the 2D space where entities move
@@ -283,6 +59,7 @@ type Simulation struct {
 	mu                  sync.Mutex // Mutex to protect state during concurrent ticks
 	nextEntityID        int        // For generating unique entity IDs
 	tickCount           int        // Counter for simulation ticks
+	DevMode             bool       // Flag to enable development mode (mock API calls)
 }
 
 // RegisterEntity adds an entity to the simulation
@@ -341,7 +118,7 @@ func (s *Simulation) ProcessEntityDecision(event EntityDecisionEvent) {
 }
 
 // NewSimulation creates a new simulation with specified parameters
-func NewSimulation(width, height int, tickRate time.Duration, decisionTimeout time.Duration, rng *rand.Rand) *Simulation {
+func NewSimulation(width, height int, tickRate time.Duration, decisionTimeout time.Duration, rng *rand.Rand, devMode bool) *Simulation {
 	outputFileName := "grid_output.txt"
 	file, err := os.OpenFile(outputFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
@@ -363,6 +140,7 @@ func NewSimulation(width, height int, tickRate time.Duration, decisionTimeout ti
 		Entities:            make(map[int]*Entity),
 		nextEntityID:        0,
 		tickCount:           0,
+		DevMode:             devMode,
 	}
 
 	sim.Grid.Cells = make([][]Cell, height)
@@ -622,8 +400,16 @@ func (s *Simulation) PrintState(file *os.File) {
 }
 
 func main() {
+	// Parse command line flags using the flag package
+	devModePtr := flag.Bool("dev", true, "Run in development mode")
+	flag.Parse()
+
+	if *devModePtr {
+		log.Println("Running in development mode")
+	}
+
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	sim := NewSimulation(5, 5, time.Second, 5*time.Second, rng)
+	sim := NewSimulation(5, 5, time.Second, 5*time.Second, rng, *devModePtr)
 	defer sim.Stop()
 
 	// Create 3 entities

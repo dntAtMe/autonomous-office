@@ -24,7 +24,7 @@ go.work
 *.swp
 *~
 *.txt
-
+*.json
 # OS specific files
 .DS_Store
 Thumbs.db
