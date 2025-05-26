@@ -32,6 +32,8 @@ Thumbs.db
 # Built binaries
 /sim
 /simulation
+/bin/
+tmp/
 
 # Log files
 *.log 

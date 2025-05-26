@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: entity-client
+  labels:
+    app: entity-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: entity-client
+  template:
+    metadata:
+      labels:
+        app: entity-client
+    spec:
+      containers:
+      - name: entity-client
+        image: entity-client:latest
+        imagePullPolicy: Never
+        env:
+        - name: SERVER_URL
+          value: "http://simulation-server-service:8080"
+        - name: DEV_MODE
+          value: "true"
+        - name: NUM_ENTITIES
+          value: "3"
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-secret
+              key: api-key
+              optional: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        command: ["/app/entity-client"]
+        args: ["-server", "$(SERVER_URL)", "-dev", "$(DEV_MODE)", "-entities", "$(NUM_ENTITIES)"]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gemini-api-secret
+type: Opaque
+data:
+  # Base64 encoded Gemini API key - replace with your actual key
+  # To encode: echo -n "your-api-key" | base64
+  api-key: "" 
