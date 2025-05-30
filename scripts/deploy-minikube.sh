@@ -71,7 +71,12 @@ echo "  kubectl logs -f deployment/simulation-server"
 echo "  kubectl logs -f deployment/entity-client"
 
 echo -e "${YELLOW}🌐 To access the simulation server:${NC}"
+echo "  # HTTP endpoints (health and status):"
 echo "  kubectl port-forward svc/simulation-server-service 8080:8080"
 echo "  Then visit: http://localhost:8080/status"
+echo ""
+echo "  # gRPC service:"
+echo "  kubectl port-forward svc/simulation-server-service 9090:9090"
+echo "  Then use gRPC client on localhost:9090"
 
 echo -e "${GREEN}🎉 Distributed simulation is now running in minikube!${NC}" 

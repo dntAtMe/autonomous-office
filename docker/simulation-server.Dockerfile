@@ -3,13 +3,16 @@ FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
-# Copy the shared module first
-COPY go.mod ./
+# Copy the root module files first (this is the simulation module)
+COPY go.mod go.sum ./
 COPY shared/ ./shared/
+COPY proto/ ./proto/
 
 # Copy the server module
-COPY cmd/simulation-server/go.mod cmd/simulation-server/go.sum ./cmd/simulation-server/
-COPY cmd/simulation-server/main.go ./cmd/simulation-server/
+COPY cmd/simulation-server/ ./cmd/simulation-server/
+
+# Download dependencies for the root module first
+RUN go mod download
 
 # Download dependencies for the server module
 WORKDIR /app/cmd/simulation-server
@@ -33,6 +36,7 @@ RUN adduser -D -s /bin/sh appuser && \
 
 USER appuser
 
-EXPOSE 8080
+# Expose both WebSocket and gRPC ports
+EXPOSE 8080 9090
 
 CMD ["./simulation-server"] 

@@ -20,7 +20,7 @@ spec:
         imagePullPolicy: Never
         env:
         - name: SERVER_URL
-          value: "http://simulation-server-service:8080"
+          value: "simulation-server-service:9090"
         - name: DEV_MODE
           value: "true"
         - name: NUM_ENTITIES

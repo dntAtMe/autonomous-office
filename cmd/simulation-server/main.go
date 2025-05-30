@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"sync"
 	"time"
 
+	pb "simulation/proto"
 	"simulation/shared"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/grpc"
 )
 
 // Cell represents a single cell in the grid that can contain entities
@@ -588,6 +591,8 @@ func main() {
 	// Parse command line flags
 	devModePtr := flag.Bool("dev", true, "Run in development mode")
 	portPtr := flag.String("port", "8080", "Port to run the server on")
+	grpcModePtr := flag.Bool("grpc", true, "Use gRPC instead of WebSocket")
+	grpcPortPtr := flag.String("grpc-port", "9090", "Port to run the gRPC server on")
 	flag.Parse()
 
 	if *devModePtr {
@@ -595,18 +600,87 @@ func main() {
 	}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	server := NewSimulationServer(5, 5, time.Second, 5*time.Second, rng, *devModePtr)
-	defer server.Stop()
 
-	// Set up HTTP routes
-	http.HandleFunc("/register", server.RegisterEntity)
-	http.HandleFunc("/health", server.HealthCheck)
-	http.HandleFunc("/status", server.Status)
+	if *grpcModePtr {
+		// Start gRPC server
+		log.Println("Starting gRPC simulation server...")
+		grpcServer := NewGRPCSimulationServer(5, 5, time.Second, 5*time.Second, rng, *devModePtr)
+		defer grpcServer.Stop()
 
-	// Start the simulation
-	server.Start()
+		// Create gRPC server
+		s := grpc.NewServer()
+		pb.RegisterSimulationServiceServer(s, grpcServer)
 
-	// Start HTTP server
-	log.Printf("Starting simulation server on port %s", *portPtr)
-	log.Fatal(http.ListenAndServe(":"+*portPtr, nil))
+		// Listen on the specified port
+		lis, err := net.Listen("tcp", ":"+*grpcPortPtr)
+		if err != nil {
+			log.Fatalf("Failed to listen on port %s: %v", *grpcPortPtr, err)
+		}
+
+		log.Printf("gRPC server listening on port %s", *grpcPortPtr)
+
+		// Start HTTP health endpoint for Kubernetes probes
+		go func() {
+			http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("healthy"))
+			})
+			http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+				gridState, _ := grpcServer.GetGridState(r.Context(), &pb.Empty{})
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"width":    gridState.Width,
+					"height":   gridState.Height,
+					"entities": len(gridState.Entities),
+				})
+			})
+			log.Printf("HTTP health server listening on port %s", *portPtr)
+			log.Fatal(http.ListenAndServe(":"+*portPtr, nil))
+		}()
+
+		// Start the simulation loop in a separate goroutine
+		go func() {
+			ticker := time.NewTicker(grpcServer.TickRate)
+			defer ticker.Stop()
+
+			// Add some test entities
+			for i := 0; i < 3; i++ {
+				_, err := grpcServer.RegisterEntity(nil, &pb.EntityRegistrationRequest{})
+				if err != nil {
+					log.Printf("Failed to register test entity %d: %v", i, err)
+				}
+			}
+
+			// Initial state output
+			grpcServer.PrintState()
+
+			for {
+				select {
+				case <-ticker.C:
+					grpcServer.Tick()
+				}
+			}
+		}()
+
+		// Start the gRPC server
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("Failed to serve gRPC: %v", err)
+		}
+	} else {
+		log.Println("Starting WebSocket simulation server...")
+		server := NewSimulationServer(5, 5, time.Second, 5*time.Second, rng, *devModePtr)
+		defer server.Stop()
+
+		// Set up HTTP routes
+		http.HandleFunc("/register", server.RegisterEntity)
+		http.HandleFunc("/health", server.HealthCheck)
+		http.HandleFunc("/status", server.Status)
+
+		// Start the simulation
+		server.Start()
+
+		// Start HTTP server
+		log.Printf("Starting WebSocket simulation server on port %s", *portPtr)
+		log.Fatal(http.ListenAndServe(":"+*portPtr, nil))
+	}
 }
