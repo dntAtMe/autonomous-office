@@ -7,17 +7,17 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"simulation/shared"
+	pb "simulation/proto"
 
-	"github.com/gorilla/websocket"
 	"google.golang.org/genai"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Config holds the application configuration
@@ -114,11 +114,12 @@ func SaveDefaultConfig(configPath string) error {
 	return nil
 }
 
-// EntityClient represents a client that connects to the simulation server
+// EntityClient represents a client that connects to the simulation server via gRPC
 type EntityClient struct {
-	ID             int
+	ID             int32
 	ServerURL      string
-	Connection     *websocket.Conn
+	Connection     *grpc.ClientConn
+	Client         pb.SimulationServiceClient
 	Config         *Config
 	DevMode        bool
 	mu             sync.Mutex
@@ -148,48 +149,38 @@ func NewEntityClient(serverURL string, devMode bool) *EntityClient {
 	}
 }
 
-// Connect establishes a WebSocket connection to the simulation server
+// Connect establishes a gRPC connection to the simulation server
 func (e *EntityClient) Connect() error {
-	u, err := url.Parse(e.ServerURL)
-	if err != nil {
-		return fmt.Errorf("invalid server URL: %v", err)
-	}
+	log.Printf("Connecting to simulation server at %s", e.ServerURL)
 
-	// Convert HTTP URL to WebSocket URL
-	if u.Scheme == "http" {
-		u.Scheme = "ws"
-	} else if u.Scheme == "https" {
-		u.Scheme = "wss"
-	}
-	u.Path = "/register"
-
-	log.Printf("Connecting to simulation server at %s", u.String())
-
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	conn, err := grpc.Dial(e.ServerURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %v", err)
 	}
 
 	e.Connection = conn
+	e.Client = pb.NewSimulationServiceClient(conn)
 
-	// Send registration request
-	registrationReq := shared.EntityRegistrationRequest{
-		EntityID: 0,                           // Server will assign ID
-		Position: shared.Position{X: 0, Y: 0}, // Server will assign position
-	}
+	// Test the connection with a health check
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	err = conn.WriteJSON(registrationReq)
+	_, err = e.Client.HealthCheck(ctx, &pb.Empty{})
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("failed to send registration request: %v", err)
+		return fmt.Errorf("health check failed: %v", err)
 	}
 
-	// Wait for registration response
-	var response shared.EntityRegistrationResponse
-	err = conn.ReadJSON(&response)
+	// Register with the server
+	registrationReq := &pb.EntityRegistrationRequest{
+		EntityId: 0,                        // Server will assign ID
+		Position: &pb.Position{X: 0, Y: 0}, // Server will assign position
+	}
+
+	response, err := e.Client.RegisterEntity(ctx, registrationReq)
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("failed to read registration response: %v", err)
+		return fmt.Errorf("failed to register entity: %v", err)
 	}
 
 	if !response.Success {
@@ -197,7 +188,7 @@ func (e *EntityClient) Connect() error {
 		return fmt.Errorf("registration failed: %s", response.Message)
 	}
 
-	e.ID = response.EntityID
+	e.ID = response.EntityId
 	log.Printf("Successfully registered as entity %d", e.ID)
 
 	return nil
@@ -251,13 +242,14 @@ func (e *EntityClient) run() {
 				}
 			}
 
-			// Handle incoming messages
-			err := e.handleMessages()
+			// Handle decision making loop
+			err := e.handleDecisionLoop()
 			if err != nil {
 				log.Printf("Connection error: %v. Reconnecting...", err)
 				if e.Connection != nil {
 					e.Connection.Close()
 					e.Connection = nil
+					e.Client = nil
 				}
 				time.Sleep(e.reconnectDelay)
 			}
@@ -265,69 +257,90 @@ func (e *EntityClient) run() {
 	}
 }
 
-// handleMessages processes incoming messages from the simulation server
-func (e *EntityClient) handleMessages() error {
+// handleDecisionLoop continuously polls for decision requests and responds
+func (e *EntityClient) handleDecisionLoop() error {
+	// In gRPC mode, we'll check the grid state less frequently
+	// The server runs its own simulation loop, so we don't need to poll aggressively
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	log.Printf("Entity %d starting decision loop", e.ID)
+
 	for {
 		select {
 		case <-e.stopChan:
 			return nil
-		default:
-			// Set a read timeout to avoid hanging indefinitely
-			e.Connection.SetReadDeadline(time.Now().Add(10 * time.Second))
-
-			var request shared.EntityDecisionRequest
-			err := e.Connection.ReadJSON(&request)
-			if err != nil {
-				return fmt.Errorf("failed to read message: %v", err)
-			}
-
-			// Clear the read deadline
-			e.Connection.SetReadDeadline(time.Time{})
-
-			// Process the decision request
-			response := e.makeDecision(request)
-
-			// Send the response with a write timeout
-			e.Connection.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			err = e.Connection.WriteJSON(response)
-			e.Connection.SetWriteDeadline(time.Time{})
+		case <-ticker.C:
+			// Get current grid state to verify we're still registered
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			gridState, err := e.Client.GetGridState(ctx, &pb.Empty{})
+			cancel()
 
 			if err != nil {
-				return fmt.Errorf("failed to send decision: %v", err)
+				return fmt.Errorf("failed to get grid state: %v", err)
 			}
+
+			// Check if we exist in the grid (server might have restarted)
+			found := false
+			for _, entity := range gridState.Entities {
+				if entity.Id == e.ID {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				// We need to re-register
+				log.Printf("Entity %d not found in grid, re-registering", e.ID)
+				if e.Connection != nil {
+					e.Connection.Close()
+					e.Connection = nil
+					e.Client = nil
+				}
+				return fmt.Errorf("entity not found in grid")
+			}
+
+			// The server handles its own simulation ticks and decision requests
+			// For now, we just verify we're still connected and registered
+			// In a full implementation, the server would use streaming to send decision requests
+			log.Printf("Entity %d verified connection (found in grid with %d total entities)", e.ID, len(gridState.Entities))
 		}
 	}
 }
 
-// makeDecision processes a decision request and returns a decision
-func (e *EntityClient) makeDecision(request shared.EntityDecisionRequest) shared.EntityDecisionResponse {
-	log.Printf("Entity %d making decision for tick %d", e.ID, request.TickNumber)
+// makeDecision processes a grid state and returns a decision
+func (e *EntityClient) makeDecision(gridState *pb.GridState) *pb.Action {
+	log.Printf("Entity %d making decision", e.ID)
 
-	var direction shared.Position
+	possibleMoves := []*pb.Position{
+		{X: 0, Y: 1},  // Up
+		{X: 0, Y: -1}, // Down
+		{X: 1, Y: 0},  // Right
+		{X: -1, Y: 0}, // Left
+	}
+
+	var direction *pb.Position
 
 	switch {
 	case e.DevMode:
-		direction = e.callDevDecision(request.PossibleMoves)
+		direction = e.callDevDecision(possibleMoves)
 	default:
-		direction = e.callGeminiForDecision(request.PossibleMoves, request.GridState)
+		direction = e.callGeminiForDecision(possibleMoves, gridState)
 	}
 
-	action := shared.Action{
-		Type:      shared.ActionMove,
+	action := &pb.Action{
+		Type:      pb.ActionType_ACTION_MOVE,
 		Direction: direction,
-		EntityID:  e.ID,
+		EntityId:  e.ID,
 	}
 
-	return shared.EntityDecisionResponse{
-		EntityID: e.ID,
-		Action:   action,
-	}
+	return action
 }
 
 // callDevDecision is a development mode function that returns a random direction
-func (e *EntityClient) callDevDecision(moves []shared.Position) shared.Position {
+func (e *EntityClient) callDevDecision(moves []*pb.Position) *pb.Position {
 	if len(moves) == 0 {
-		return shared.Position{X: 0, Y: 0}
+		return &pb.Position{X: 0, Y: 0}
 	}
 
 	randomIdx := rand.Intn(len(moves))
@@ -336,12 +349,12 @@ func (e *EntityClient) callDevDecision(moves []shared.Position) shared.Position 
 }
 
 // callGeminiForDecision calls the Gemini API to get a movement direction
-func (e *EntityClient) callGeminiForDecision(moves []shared.Position, gridState shared.GridState) shared.Position {
+func (e *EntityClient) callGeminiForDecision(moves []*pb.Position, gridState *pb.GridState) *pb.Position {
 	// Check if API key is available
 	apiKey := e.Config.GeminiAPIKey
 	if apiKey == "" {
 		log.Println("Error: No Gemini API key configured, using fallback direction")
-		return shared.Position{X: 0, Y: 0} // Default to staying in place
+		return &pb.Position{X: 0, Y: 0} // Default to staying in place
 	}
 
 	ctx := context.Background()
@@ -353,7 +366,7 @@ func (e *EntityClient) callGeminiForDecision(moves []shared.Position, gridState 
 
 	if err != nil {
 		log.Printf("Error creating Gemini client: %v", err)
-		return shared.Position{X: 0, Y: 0}
+		return &pb.Position{X: 0, Y: 0}
 	}
 
 	// Create a more detailed prompt with grid information
@@ -362,10 +375,10 @@ Current entities on the grid:
 `, e.ID, gridState.Width, gridState.Height)
 
 	for _, entity := range gridState.Entities {
-		if entity.ID == e.ID {
+		if entity.Id == e.ID {
 			prompt += fmt.Sprintf("- You are at position (%d, %d)\n", entity.Position.X, entity.Position.Y)
 		} else {
-			prompt += fmt.Sprintf("- Entity %d is at position (%d, %d)\n", entity.ID, entity.Position.X, entity.Position.Y)
+			prompt += fmt.Sprintf("- Entity %d is at position (%d, %d)\n", entity.Id, entity.Position.X, entity.Position.Y)
 		}
 	}
 
@@ -383,7 +396,7 @@ Current entities on the grid:
 	)
 	if err != nil {
 		log.Printf("Error generating content: %v", err)
-		return shared.Position{X: 0, Y: 0}
+		return &pb.Position{X: 0, Y: 0}
 	}
 
 	response := result.Text()
@@ -392,22 +405,22 @@ Current entities on the grid:
 
 	switch response {
 	case "U":
-		return shared.Position{X: 0, Y: 1}
+		return &pb.Position{X: 0, Y: 1}
 	case "D":
-		return shared.Position{X: 0, Y: -1}
+		return &pb.Position{X: 0, Y: -1}
 	case "L":
-		return shared.Position{X: -1, Y: 0}
+		return &pb.Position{X: -1, Y: 0}
 	case "R":
-		return shared.Position{X: 1, Y: 0}
+		return &pb.Position{X: 1, Y: 0}
 	default:
-		return shared.Position{X: 0, Y: 0}
+		return &pb.Position{X: 0, Y: 0}
 	}
 }
 
 func main() {
 	// Parse command line flags
 	devModePtr := flag.Bool("dev", true, "Run in development mode")
-	serverURLPtr := flag.String("server", "http://localhost:8080", "Simulation server URL")
+	serverURLPtr := flag.String("server", "simulation-server-service:9090", "Simulation server URL (gRPC)")
 	numEntitiesPtr := flag.Int("entities", 3, "Number of entities to create")
 	flag.Parse()
 
@@ -415,7 +428,7 @@ func main() {
 		log.Println("Running in development mode")
 	}
 
-	log.Printf("Creating %d entities to connect to %s", *numEntitiesPtr, *serverURLPtr)
+	log.Printf("Creating %d entities to connect to gRPC server at %s", *numEntitiesPtr, *serverURLPtr)
 
 	// Create and start multiple entity clients
 	var clients []*EntityClient

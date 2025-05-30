@@ -3,13 +3,16 @@ FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
-# Copy the shared module first
-COPY go.mod ./
+# Copy the root module files first (this is the simulation module)
+COPY go.mod go.sum ./
 COPY shared/ ./shared/
+COPY proto/ ./proto/
 
 # Copy the client module
-COPY cmd/entity-client/go.mod cmd/entity-client/go.sum ./cmd/entity-client/
-COPY cmd/entity-client/main.go ./cmd/entity-client/
+COPY cmd/entity-client/ ./cmd/entity-client/
+
+# Download dependencies for the root module first
+RUN go mod download
 
 # Download dependencies for the client module
 WORKDIR /app/cmd/entity-client
