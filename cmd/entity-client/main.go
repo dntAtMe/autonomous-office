@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	pb "simulation/proto"
@@ -19,6 +22,17 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+//go:embed prompt_template.txt
+var promptTemplate string
+
+// PromptData holds the data for the prompt template
+type PromptData struct {
+	EntityID   int32
+	GridWidth  int32
+	GridHeight int32
+	Entities   []*pb.EntityState
+}
 
 // Config holds the application configuration
 type Config struct {
@@ -348,6 +362,30 @@ func (e *EntityClient) callDevDecision(moves []*pb.Position) *pb.Position {
 	return moves[randomIdx]
 }
 
+func (e *EntityClient) loadPromptTemplate(gridState *pb.GridState) (string, error) {
+	promptData := PromptData{
+		EntityID:   e.ID,
+		GridWidth:  gridState.Width,
+		GridHeight: gridState.Height,
+		Entities:   gridState.Entities,
+	}
+
+	var prompt bytes.Buffer
+	tmpl, err := template.New("prompt").Parse(promptTemplate)
+	if err != nil {
+		log.Printf("Error parsing prompt template: %v", err)
+		return "", err
+	}
+
+	err = tmpl.Execute(&prompt, promptData)
+	if err != nil {
+		log.Printf("Error executing prompt template: %v", err)
+		return "", err
+	}
+
+	return prompt.String(), nil
+}
+
 // callGeminiForDecision calls the Gemini API to get a movement direction
 func (e *EntityClient) callGeminiForDecision(moves []*pb.Position, gridState *pb.GridState) *pb.Position {
 	// Check if API key is available
@@ -369,22 +407,13 @@ func (e *EntityClient) callGeminiForDecision(moves []*pb.Position, gridState *pb
 		return &pb.Position{X: 0, Y: 0}
 	}
 
-	// Create a more detailed prompt with grid information
-	prompt := fmt.Sprintf(`You are entity %d in a %dx%d grid simulation. 
-Current entities on the grid:
-`, e.ID, gridState.Width, gridState.Height)
-
-	for _, entity := range gridState.Entities {
-		if entity.Id == e.ID {
-			prompt += fmt.Sprintf("- You are at position (%d, %d)\n", entity.Position.X, entity.Position.Y)
-		} else {
-			prompt += fmt.Sprintf("- Entity %d is at position (%d, %d)\n", entity.Id, entity.Position.X, entity.Position.Y)
-		}
-	}
-
-	prompt += "\nYou can move up, down, left, or right. Answer with a single letter: U, D, L, R and nothing else. Pick randomly if you can move in multiple directions."
-
 	temperature := float32(1.0)
+
+	prompt, err := e.loadPromptTemplate(gridState)
+	if err != nil {
+		log.Printf("Error loading prompt template: %v", err)
+		return &pb.Position{X: 0, Y: 0}
+	}
 
 	result, err := client.Models.GenerateContent(
 		ctx,
