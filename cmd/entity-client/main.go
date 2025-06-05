@@ -74,7 +74,14 @@ func LoadConfig(configPath string) *Config {
 	}
 
 	if config.GeminiAPIKey == "" {
-		log.Println("WARNING: No API key found in config file")
+		log.Println("No API key found in config file, checking environment variables")
+		apiKey := os.Getenv("GEMINI_API_KEY")
+		if apiKey != "" {
+			log.Println("Loaded API key from environment variable")
+			config.GeminiAPIKey = apiKey
+		} else {
+			log.Println("WARNING: No API key found in config file or environment variables")
+		}
 	}
 
 	log.Println("Configuration loaded successfully")
@@ -152,6 +159,11 @@ func NewEntityClient(serverURL string, devMode bool) *EntityClient {
 
 	// Load the configuration
 	config := LoadConfig(configPath)
+
+	// If not in dev mode, require API key
+	if !devMode && config.GeminiAPIKey == "" {
+		log.Fatal("FATAL: Running in production mode but no Gemini API key found. Please set GEMINI_API_KEY environment variable or add it to config.json")
+	}
 
 	return &EntityClient{
 		ServerURL:      serverURL,
@@ -273,57 +285,63 @@ func (e *EntityClient) run() {
 
 // handleDecisionLoop continuously polls for decision requests and responds
 func (e *EntityClient) handleDecisionLoop() error {
-	// In gRPC mode, we'll check the grid state less frequently
-	// The server runs its own simulation loop, so we don't need to poll aggressively
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	log.Printf("Entity %d establishing stream connection", e.ID)
 
-	log.Printf("Entity %d starting decision loop", e.ID)
+	// Establish bidirectional stream
+	ctx := context.Background()
+	stream, err := e.Client.EntityStream(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to establish entity stream: %v", err)
+	}
 
+	// Send initial identification message
+	initialMsg := &pb.EntityDecisionResponse{
+		EntityId: e.ID,
+		// Action is nil for identification message
+	}
+
+	err = stream.Send(initialMsg)
+	if err != nil {
+		return fmt.Errorf("failed to send identification message: %v", err)
+	}
+
+	log.Printf("Entity %d stream established, waiting for decision requests", e.ID)
+
+	// Listen for decision requests and respond
 	for {
 		select {
 		case <-e.stopChan:
 			return nil
-		case <-ticker.C:
-			// Get current grid state to verify we're still registered
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			gridState, err := e.Client.GetGridState(ctx, &pb.Empty{})
-			cancel()
-
+		default:
+			// Receive decision request from server
+			decisionRequest, err := stream.Recv()
 			if err != nil {
-				return fmt.Errorf("failed to get grid state: %v", err)
+				return fmt.Errorf("failed to receive decision request: %v", err)
 			}
 
-			// Check if we exist in the grid (server might have restarted)
-			found := false
-			for _, entity := range gridState.Entities {
-				if entity.Id == e.ID {
-					found = true
-					break
-				}
+			log.Printf("Entity %d received decision request for tick %d", e.ID, decisionRequest.TickNumber)
+
+			// Make decision
+			action := e.makeDecision(decisionRequest)
+
+			// Send decision response
+			response := &pb.EntityDecisionResponse{
+				EntityId: e.ID,
+				Action:   action,
 			}
 
-			if !found {
-				// We need to re-register
-				log.Printf("Entity %d not found in grid, re-registering", e.ID)
-				if e.Connection != nil {
-					e.Connection.Close()
-					e.Connection = nil
-					e.Client = nil
-				}
-				return fmt.Errorf("entity not found in grid")
+			err = stream.Send(response)
+			if err != nil {
+				return fmt.Errorf("failed to send decision response: %v", err)
 			}
 
-			// The server handles its own simulation ticks and decision requests
-			// For now, we just verify we're still connected and registered
-			// In a full implementation, the server would use streaming to send decision requests
-			log.Printf("Entity %d verified connection (found in grid with %d total entities)", e.ID, len(gridState.Entities))
+			log.Printf("Entity %d sent decision: %v", e.ID, action.Type)
 		}
 	}
 }
 
 // makeDecision processes a grid state and returns a decision
-func (e *EntityClient) makeDecision(gridState *pb.GridState) *pb.Action {
+func (e *EntityClient) makeDecision(request *pb.EntityDecisionRequest) *pb.Action {
 	log.Printf("Entity %d making decision", e.ID)
 
 	possibleMoves := []*pb.Position{
@@ -339,7 +357,7 @@ func (e *EntityClient) makeDecision(gridState *pb.GridState) *pb.Action {
 	case e.DevMode:
 		direction = e.callDevDecision(possibleMoves)
 	default:
-		direction = e.callGeminiForDecision(possibleMoves, gridState)
+		direction = e.callGeminiForDecision(possibleMoves, request.GridState)
 	}
 
 	action := &pb.Action{
@@ -391,8 +409,7 @@ func (e *EntityClient) callGeminiForDecision(moves []*pb.Position, gridState *pb
 	// Check if API key is available
 	apiKey := e.Config.GeminiAPIKey
 	if apiKey == "" {
-		log.Println("Error: No Gemini API key configured, using fallback direction")
-		return &pb.Position{X: 0, Y: 0} // Default to staying in place
+		log.Fatal("FATAL: No Gemini API key configured for production mode")
 	}
 
 	ctx := context.Background()
