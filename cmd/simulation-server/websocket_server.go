@@ -287,8 +287,10 @@ func (s *WebSocketServer) simulationLoop() {
 	// Initial state
 	s.core.PrintState()
 
-	totalTicks := 1000
-	for i := 0; i < totalTicks; i++ {
+	if s.TotalTicks == 0 {
+		s.TotalTicks = 1000 // Default value if not configured
+	}
+	for i := 0; i < s.TotalTicks; i++ {
 		select {
 		case <-s.stopChan:
 			log.Println("WebSocket simulation stopped")
