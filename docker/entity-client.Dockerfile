@@ -36,4 +36,4 @@ RUN adduser -D -s /bin/sh appuser && \
 
 USER appuser
 
-CMD ["./entity-client"] 
+ENTRYPOINT ["/app/entity-client"] 

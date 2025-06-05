@@ -19,12 +19,6 @@ spec:
         image: entity-client:latest
         imagePullPolicy: Never
         env:
-        - name: SERVER_URL
-          value: "simulation-server-service:9090"
-        - name: DEV_MODE
-          value: "true"
-        - name: NUM_ENTITIES
-          value: "3"
         - name: GEMINI_API_KEY
           valueFrom:
             secretKeyRef:
@@ -38,8 +32,10 @@ spec:
           limits:
             memory: "256Mi"
             cpu: "200m"
-        command: ["/app/entity-client"]
-        args: ["-server", "$(SERVER_URL)", "-dev", "$(DEV_MODE)", "-entities", "$(NUM_ENTITIES)"]
+        args: 
+        - "-server=simulation-server-service:9090"
+        - "-dev=true"
+        - "-entities=2"
 ---
 apiVersion: v1
 kind: Secret
