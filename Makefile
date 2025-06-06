@@ -1,4 +1,4 @@
-.PHONY: help lint lint-fix format test build clean install-tools run-server
+.PHONY: help lint lint-fix format test build clean install-tools run-server run-server-dev deps check ci test-coverage build-all
 
 help:
 	@echo "Available commands:"
