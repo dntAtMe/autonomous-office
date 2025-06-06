@@ -110,7 +110,7 @@ type SimulationCore struct {
 // NewSimulationCore creates a new core simulation engine
 func NewSimulationCore(width, height int, tickRate, decisionTimeout time.Duration, rng *rand.Rand, devMode bool) *SimulationCore {
 	outputFileName := "grid_output.txt"
-	file, err := os.OpenFile(outputFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:mnd // File permission
+	file, err := os.OpenFile(outputFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		log.Fatalf("Failed to open output file %s: %v", outputFileName, err)
 	}

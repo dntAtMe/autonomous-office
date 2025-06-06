@@ -91,7 +91,7 @@ issues:
         - mnd
         - goconst
         - gosec
-    - path: cmd/
+    - path: \.go$
       linters:
         - mnd
     - linters:
