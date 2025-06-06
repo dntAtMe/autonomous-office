@@ -14,6 +14,16 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	defaultGridWidth       = 5
+	defaultGridHeight      = 5
+	defaultTickRate        = time.Second
+	defaultDecisionTimeout = 5 * time.Second
+	httpReadTimeout        = 10 * time.Second
+	httpWriteTimeout       = 10 * time.Second
+	httpIdleTimeout        = 60 * time.Second
+)
+
 func main() {
 	// Parse command line flags
 	devModePtr := flag.Bool("dev", true, "Run in development mode")
@@ -28,7 +38,7 @@ func main() {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Create shared simulation core
-	core := NewSimulationCore(5, 5, time.Second, 5*time.Second, rng, *devModePtr)
+	core := NewSimulationCore(defaultGridWidth, defaultGridHeight, defaultTickRate, defaultDecisionTimeout, rng, *devModePtr)
 	defer core.Stop()
 
 	// Start gRPC server
@@ -43,21 +53,26 @@ func main() {
 	// Listen on the specified port
 	lis, err := net.Listen("tcp", ":"+*grpcPortPtr)
 	if err != nil {
-		log.Fatalf("Failed to listen on port %s: %v", *grpcPortPtr, err)
+		grpcServer.Stop()
+		core.Stop()
+		log.Fatalf("Failed to listen on port %s: %v", *grpcPortPtr, err) //nolint:gocritic
 	}
 
 	log.Printf("gRPC server listening on port %s", *grpcPortPtr)
 
 	// Start HTTP health endpoint for Kubernetes probes
 	go func() {
-		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		mux := http.NewServeMux()
+
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			if _, err := w.Write([]byte("healthy")); err != nil {
 				log.Printf("Failed to write health response: %v", err)
 				// Note: Cannot change status code after WriteHeader, but log the error
 			}
 		})
-		http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+
+		mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 			gridState, err := grpcServer.GetGridState(r.Context(), &pb.Empty{})
 			if err != nil {
 				log.Printf("Failed to get grid state: %v", err)
@@ -75,8 +90,17 @@ func main() {
 				// Note: Cannot send error response as headers are already written
 			}
 		})
+
+		server := &http.Server{
+			Addr:         ":" + *portPtr,
+			Handler:      mux,
+			ReadTimeout:  httpReadTimeout,
+			WriteTimeout: httpWriteTimeout,
+			IdleTimeout:  httpIdleTimeout,
+		}
+
 		log.Printf("HTTP health server listening on port %s", *portPtr)
-		log.Fatal(http.ListenAndServe(":"+*portPtr, nil))
+		log.Fatal(server.ListenAndServe())
 	}()
 
 	// Start the simulation loop in a separate goroutine
@@ -87,12 +111,9 @@ func main() {
 		// Initial state output
 		core.PrintState()
 
-		for {
-			select {
-			case <-ticker.C:
-				grpcServer.Tick()
-				core.PrintState()
-			}
+		for range ticker.C {
+			grpcServer.Tick()
+			core.PrintState()
 		}
 	}()
 

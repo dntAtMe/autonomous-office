@@ -7,8 +7,6 @@ help:
 install-tools:
 	@echo "Installing golangci-lint..."
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	@echo "Installing goimports..."
-	@go install golang.org/x/tools/cmd/goimports@latest
 	@echo "Installing gofumpt..."
 	@go install mvdan.cc/gofumpt@latest
 
@@ -31,13 +29,10 @@ lint-fix:
 format:
 	@echo "Formatting code in root module..."
 	$(shell go env GOPATH)/bin/gofumpt -w .
-	$(shell go env GOPATH)/bin/goimports -w -local simulation .
 	@echo "Formatting code in simulation-server module..."
 	cd cmd/simulation-server && $(shell go env GOPATH)/bin/gofumpt -w .
-	cd cmd/simulation-server && $(shell go env GOPATH)/bin/goimports -w -local simulation .
 	@echo "Formatting code in entity-client module..."
 	cd cmd/entity-client && $(shell go env GOPATH)/bin/gofumpt -w .
-	cd cmd/entity-client && $(shell go env GOPATH)/bin/goimports -w -local simulation .
 
 test:
 	@echo "Running tests in root module..."

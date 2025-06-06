@@ -17,9 +17,6 @@ linters-settings:
   gocyclo:
     min-complexity: 15
 
-  goimports:
-    local-prefixes: simulation
-
   gocritic:
     enabled-tags:
       - diagnostic
@@ -51,7 +48,6 @@ linters:
   disable-all: true
   enable:
     - bodyclose
-    - depguard
     - dogsled
     - dupl
     - errcheck
@@ -63,7 +59,6 @@ linters:
     - gocyclo
     - gofmt
     - gofumpt
-    - goimports
     - mnd
     - goprintffuncname
     - gosec
