@@ -7,8 +7,9 @@ import (
 	"sync"
 	"time"
 
-	pb "simulation/proto"
 	"simulation/shared"
+
+	pb "simulation/proto"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

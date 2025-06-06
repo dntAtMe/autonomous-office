@@ -1,3 +1,6 @@
+// Package shared contains common types and data structures used across the simulation system.
+// It defines entities, grid states, actions, and communication structures for the
+// simulation server and entity clients.
 package shared
 
 import "time"

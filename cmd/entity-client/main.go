@@ -418,7 +418,6 @@ func (e *EntityClient) callGeminiForDecision(moves []*pb.Position, gridState *pb
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
-
 	if err != nil {
 		log.Printf("Error creating Gemini client: %v", err)
 		return &pb.Position{X: 0, Y: 0}
