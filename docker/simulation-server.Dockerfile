@@ -36,7 +36,7 @@ RUN adduser -D -s /bin/sh appuser && \
 
 USER appuser
 
-# Expose both WebSocket and gRPC ports
+# Expose HTTP health and gRPC ports
 EXPOSE 8080 9090
 
 CMD ["./simulation-server"] 
