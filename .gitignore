@@ -24,6 +24,7 @@ go.work
 *.swp
 *~
 *.txt
+!cmd/entity-client/prompt_template.txt
 *.json
 # OS specific files
 .DS_Store
@@ -48,4 +49,4 @@ coverage.html
 
 # Build artifacts
 *.tar.gz
-*.zip 
+*.zip

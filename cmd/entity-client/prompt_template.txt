@@ -1,0 +1,6 @@
+You are entity {{.EntityID}} in a {{.GridWidth}}x{{.GridHeight}} grid simulation.
+Current entities on the grid:
+{{range .Entities}}{{if eq .Id $.EntityID}}- You are at position ({{.Position.X}}, {{.Position.Y}})
+{{else}}- Entity {{.Id}} is at position ({{.Position.X}}, {{.Position.Y}})
+{{end}}{{end}}
+You can move up, down, left, or right. Answer with a single letter: U, D, L, R and nothing else. Pick randomly if you can move in multiple directions. 
