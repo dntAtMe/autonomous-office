@@ -82,7 +82,7 @@ func NewBaseEntity(id int32) BaseEntity {
 	}
 }
 
-// EntityInterface defines what any entity (WebSocket, gRPC, etc.) must implement
+// EntityInterface defines what any entity must implement
 type EntityInterface interface {
 	GetID() int32
 	GetPosition() shared.Position

@@ -5,7 +5,6 @@ go 1.23
 toolchain go1.23.9
 
 require (
-	github.com/gorilla/websocket v1.5.3
 	google.golang.org/grpc v1.72.2
 	simulation v0.0.0
 )
