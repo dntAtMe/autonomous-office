@@ -52,16 +52,28 @@ func main() {
 	go func() {
 		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("healthy"))
+			if _, err := w.Write([]byte("healthy")); err != nil {
+				log.Printf("Failed to write health response: %v", err)
+				// Note: Cannot change status code after WriteHeader, but log the error
+			}
 		})
 		http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-			gridState, _ := grpcServer.GetGridState(r.Context(), &pb.Empty{})
+			gridState, err := grpcServer.GetGridState(r.Context(), &pb.Empty{})
+			if err != nil {
+				log.Printf("Failed to get grid state: %v", err)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
 				"width":    gridState.Width,
 				"height":   gridState.Height,
 				"entities": len(gridState.Entities),
-			})
+			}); err != nil {
+				log.Printf("Failed to encode JSON response: %v", err)
+				// Note: Cannot send error response as headers are already written
+			}
 		})
 		log.Printf("HTTP health server listening on port %s", *portPtr)
 		log.Fatal(http.ListenAndServe(":"+*portPtr, nil))
