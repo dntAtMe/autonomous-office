@@ -23,6 +23,14 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// Constants for magic numbers
+const (
+	defaultReconnectDelay  = 5 * time.Second
+	defaultTimeout         = 5 * time.Second
+	defaultEntitiesCount   = 3
+	defaultConnectionDelay = 100 * time.Millisecond
+)
+
 //go:embed prompt_template.txt
 var promptTemplate string
 
@@ -59,12 +67,16 @@ func LoadConfig(configPath string) *Config {
 	}
 
 	// Open and read the config file
-	file, err := os.Open(configPath)
+	file, err := os.Open(configPath) // #nosec G304 - configPath is from a controlled source
 	if err != nil {
 		log.Printf("Error opening config file: %v", err)
 		return config
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			log.Printf("Error closing config file: %v", closeErr)
+		}
+	}()
 
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(config)
@@ -115,11 +127,15 @@ func SaveDefaultConfig(configPath string) error {
 	}
 
 	// Create the file
-	file, err := os.Create(configPath)
+	file, err := os.Create(configPath) // #nosec G304 - configPath is from a controlled source
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			log.Printf("Error closing config file: %v", closeErr)
+		}
+	}()
 
 	// Write the default config as JSON
 	encoder := json.NewEncoder(file)
@@ -171,7 +187,7 @@ func NewEntityClient(serverURL string, devMode bool) *EntityClient {
 		DevMode:        devMode,
 		isRunning:      false,
 		stopChan:       make(chan bool),
-		reconnectDelay: 5 * time.Second,
+		reconnectDelay: defaultReconnectDelay,
 	}
 }
 
@@ -179,22 +195,24 @@ func NewEntityClient(serverURL string, devMode bool) *EntityClient {
 func (e *EntityClient) Connect() error {
 	log.Printf("Connecting to simulation server at %s", e.ServerURL)
 
-	conn, err := grpc.Dial(e.ServerURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(e.ServerURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("failed to connect to server: %v", err)
+		return fmt.Errorf("failed to connect to server: %w", err)
 	}
 
 	e.Connection = conn
 	e.Client = pb.NewSimulationServiceClient(conn)
 
 	// Test the connection with a health check
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	_, err = e.Client.HealthCheck(ctx, &pb.Empty{})
 	if err != nil {
-		conn.Close()
-		return fmt.Errorf("health check failed: %v", err)
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("Error closing connection after health check failure: %v", closeErr)
+		}
+		return fmt.Errorf("health check failed: %w", err)
 	}
 
 	// Register with the server
@@ -205,12 +223,16 @@ func (e *EntityClient) Connect() error {
 
 	response, err := e.Client.RegisterEntity(ctx, registrationReq)
 	if err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to register entity: %v", err)
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("Error closing connection after registration failure: %v", closeErr)
+		}
+		return fmt.Errorf("failed to register entity: %w", err)
 	}
 
 	if !response.Success {
-		conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("Error closing connection after registration rejection: %v", closeErr)
+		}
 		return fmt.Errorf("registration failed: %s", response.Message)
 	}
 
@@ -246,7 +268,9 @@ func (e *EntityClient) Stop() {
 	close(e.stopChan)
 
 	if e.Connection != nil {
-		e.Connection.Close()
+		if closeErr := e.Connection.Close(); closeErr != nil {
+			log.Printf("Error closing connection during stop: %v", closeErr)
+		}
 	}
 }
 
@@ -273,7 +297,9 @@ func (e *EntityClient) run() {
 			if err != nil {
 				log.Printf("Connection error: %v. Reconnecting...", err)
 				if e.Connection != nil {
-					e.Connection.Close()
+					if closeErr := e.Connection.Close(); closeErr != nil {
+						log.Printf("Error closing connection during reconnect: %v", closeErr)
+					}
 					e.Connection = nil
 					e.Client = nil
 				}
@@ -291,7 +317,7 @@ func (e *EntityClient) handleDecisionLoop() error {
 	ctx := context.Background()
 	stream, err := e.Client.EntityStream(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to establish entity stream: %v", err)
+		return fmt.Errorf("failed to establish entity stream: %w", err)
 	}
 
 	// Send initial identification message
@@ -302,7 +328,7 @@ func (e *EntityClient) handleDecisionLoop() error {
 
 	err = stream.Send(initialMsg)
 	if err != nil {
-		return fmt.Errorf("failed to send identification message: %v", err)
+		return fmt.Errorf("failed to send identification message: %w", err)
 	}
 
 	log.Printf("Entity %d stream established, waiting for decision requests", e.ID)
@@ -316,7 +342,7 @@ func (e *EntityClient) handleDecisionLoop() error {
 			// Receive decision request from server
 			decisionRequest, err := stream.Recv()
 			if err != nil {
-				return fmt.Errorf("failed to receive decision request: %v", err)
+				return fmt.Errorf("failed to receive decision request: %w", err)
 			}
 
 			log.Printf("Entity %d received decision request for tick %d", e.ID, decisionRequest.TickNumber)
@@ -332,7 +358,7 @@ func (e *EntityClient) handleDecisionLoop() error {
 
 			err = stream.Send(response)
 			if err != nil {
-				return fmt.Errorf("failed to send decision response: %v", err)
+				return fmt.Errorf("failed to send decision response: %w", err)
 			}
 
 			log.Printf("Entity %d sent decision: %v", e.ID, action.Type)
@@ -357,7 +383,7 @@ func (e *EntityClient) makeDecision(request *pb.EntityDecisionRequest) *pb.Actio
 	case e.DevMode:
 		direction = e.callDevDecision(possibleMoves)
 	default:
-		direction = e.callGeminiForDecision(possibleMoves, request.GridState)
+		direction = e.callGeminiForDecision(request.GridState)
 	}
 
 	action := &pb.Action{
@@ -405,7 +431,7 @@ func (e *EntityClient) loadPromptTemplate(gridState *pb.GridState) (string, erro
 }
 
 // callGeminiForDecision calls the Gemini API to get a movement direction
-func (e *EntityClient) callGeminiForDecision(moves []*pb.Position, gridState *pb.GridState) *pb.Position {
+func (e *EntityClient) callGeminiForDecision(gridState *pb.GridState) *pb.Position {
 	// Check if API key is available
 	apiKey := e.Config.GeminiAPIKey
 	if apiKey == "" {
@@ -418,7 +444,6 @@ func (e *EntityClient) callGeminiForDecision(moves []*pb.Position, gridState *pb
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
-
 	if err != nil {
 		log.Printf("Error creating Gemini client: %v", err)
 		return &pb.Position{X: 0, Y: 0}
@@ -467,7 +492,7 @@ func main() {
 	// Parse command line flags
 	devModePtr := flag.Bool("dev", true, "Run in development mode")
 	serverURLPtr := flag.String("server", "simulation-server-service:9090", "Simulation server URL (gRPC)")
-	numEntitiesPtr := flag.Int("entities", 3, "Number of entities to create")
+	numEntitiesPtr := flag.Int("entities", defaultEntitiesCount, "Number of entities to create")
 	flag.Parse()
 
 	if *devModePtr {
@@ -477,14 +502,11 @@ func main() {
 	log.Printf("Creating %d entities to connect to gRPC server at %s", *numEntitiesPtr, *serverURLPtr)
 
 	// Create and start multiple entity clients
-	var clients []*EntityClient
 	for i := 0; i < *numEntitiesPtr; i++ {
 		client := NewEntityClient(*serverURLPtr, *devModePtr)
-		clients = append(clients, client)
 		client.Start()
 
-		// Small delay between connections to avoid overwhelming the server
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(defaultConnectionDelay)
 	}
 
 	// Wait for interrupt signal

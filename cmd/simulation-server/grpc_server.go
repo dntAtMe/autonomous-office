@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"log"
+	"math"
 	"math/rand"
+	"simulation/shared"
 	"sync"
 	"time"
 
 	pb "simulation/proto"
-	"simulation/shared"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,7 +24,22 @@ func pbPositionToShared(pos *pb.Position) shared.Position {
 }
 
 func sharedPositionToPb(pos shared.Position) *pb.Position {
-	return &pb.Position{X: int32(pos.X), Y: int32(pos.Y)}
+	// Check for overflow and clamp values
+	x := pos.X
+	if x > math.MaxInt32 {
+		x = math.MaxInt32
+	} else if x < math.MinInt32 {
+		x = math.MinInt32
+	}
+
+	y := pos.Y
+	if y > math.MaxInt32 {
+		y = math.MaxInt32
+	} else if y < math.MinInt32 {
+		y = math.MinInt32
+	}
+
+	return &pb.Position{X: int32(x), Y: int32(y)} //nolint:gosec // Overflow protection above
 }
 
 func pbActionToShared(action *pb.Action) shared.Action {
@@ -67,10 +83,6 @@ type GRPCSimulationServer struct {
 	entityStreams map[int32]pb.SimulationService_EntityStreamServer
 	streamsMu     sync.RWMutex
 
-	// Decision channels for RPC communication
-	decisionChans map[int32]chan *pb.EntityDecisionResponse
-	chansMu       sync.RWMutex
-
 	// Decision timing tracking
 	decisionStartTimes map[int32]time.Time
 	timingMu           sync.RWMutex
@@ -82,7 +94,6 @@ func NewGRPCSimulationServer(core *SimulationCore) *GRPCSimulationServer {
 		core:               core,
 		Rand:               core.Rand,
 		entityStreams:      make(map[int32]pb.SimulationService_EntityStreamServer),
-		decisionChans:      make(map[int32]chan *pb.EntityDecisionResponse),
 		decisionStartTimes: make(map[int32]time.Time),
 	}
 
@@ -125,8 +136,16 @@ func (s *GRPCSimulationServer) GetGridState(ctx context.Context, req *pb.Empty) 
 
 	entities := make([]*pb.EntityState, 0, len(gridState.Entities))
 	for _, entity := range gridState.Entities {
+		// Check for overflow before converting
+		entityID := entity.ID
+		if entityID > math.MaxInt32 {
+			entityID = math.MaxInt32
+		} else if entityID < math.MinInt32 {
+			entityID = math.MinInt32
+		}
+
 		entities = append(entities, &pb.EntityState{
-			Id:                   int32(entity.ID),
+			Id:                   int32(entityID), //nolint:gosec // Overflow protection above
 			Position:             sharedPositionToPb(entity.Position),
 			DecidedActionDisplay: entity.DecidedActionDisplay,
 			LastDecisionTimeNs:   entity.LastDecisionTime.Nanoseconds(),
@@ -134,9 +153,24 @@ func (s *GRPCSimulationServer) GetGridState(ctx context.Context, req *pb.Empty) 
 		})
 	}
 
+	// Check for overflow before converting grid dimensions
+	width := gridState.Width
+	if width > math.MaxInt32 {
+		width = math.MaxInt32
+	} else if width < math.MinInt32 {
+		width = math.MinInt32
+	}
+
+	height := gridState.Height
+	if height > math.MaxInt32 {
+		height = math.MaxInt32
+	} else if height < math.MinInt32 {
+		height = math.MinInt32
+	}
+
 	return &pb.GridState{
-		Width:    int32(gridState.Width),
-		Height:   int32(gridState.Height),
+		Width:    int32(width),  //nolint:gosec // Overflow protection above
+		Height:   int32(height), //nolint:gosec // Overflow protection above
 		Entities: entities,
 	}, nil
 }
@@ -248,32 +282,6 @@ func (s *GRPCSimulationServer) requestDecisionFromClient(entityID int32) {
 		if entity, exists := s.core.Entities[entityID]; exists {
 			entity.SetDeciding(false)
 		}
-	}
-}
-
-// formatActionForDisplay converts a protobuf Action to a short string representation
-func (s *GRPCSimulationServer) formatActionForDisplay(action *pb.Action) string {
-	switch action.Type {
-	case pb.ActionType_ACTION_MOVE:
-		if action.Direction != nil {
-			switch {
-			case action.Direction.X == 0 && action.Direction.Y == 1: // Up
-				return "UP"
-			case action.Direction.X == 0 && action.Direction.Y == -1: // Down
-				return "DW"
-			case action.Direction.X == -1 && action.Direction.Y == 0: // Left
-				return "LT"
-			case action.Direction.X == 1 && action.Direction.Y == 0: // Right
-				return "RT"
-			default:
-				return "M?" // Unknown move direction
-			}
-		}
-		return "M?"
-	case pb.ActionType_ACTION_WAIT:
-		return "ST" // Stay
-	default:
-		return "--" // Unknown action type
 	}
 }
 

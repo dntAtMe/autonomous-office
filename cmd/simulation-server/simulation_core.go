@@ -5,10 +5,9 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"simulation/shared"
 	"sync"
 	"time"
-
-	"simulation/shared"
 )
 
 // Cell represents a single cell in the grid that can contain entities
@@ -28,7 +27,7 @@ func (c *Cell) OnEnter(entity *RemoteEntity) {
 }
 
 // OnExit handles an entity exiting this cell
-func (c *Cell) OnExit(entity *RemoteEntity) {
+func (c *Cell) OnExit(_ *RemoteEntity) {
 	c.Occupant = nil
 }
 
@@ -60,10 +59,9 @@ type BaseEntity struct {
 	decidedActionDisplay string
 	lastDecisionTime     time.Duration
 	isDeciding           bool
-	mu                   sync.Mutex
 }
 
-// EntityInterface methods implemented by BaseEntity
+// GetID returns the entity ID
 func (e *BaseEntity) GetID() int32                               { return e.id }
 func (e *BaseEntity) GetPosition() shared.Position               { return e.position }
 func (e *BaseEntity) SetPosition(pos shared.Position)            { e.position = pos }
@@ -95,7 +93,7 @@ type EntityInterface interface {
 	SetDeciding(deciding bool)
 }
 
-// Core simulation engine that can work with any transport
+// SimulationCore represents the core simulation engine that can work with any transport
 type SimulationCore struct {
 	Grid            Grid
 	Entities        map[int32]EntityInterface
@@ -110,9 +108,9 @@ type SimulationCore struct {
 }
 
 // NewSimulationCore creates a new core simulation engine
-func NewSimulationCore(width, height int, tickRate time.Duration, decisionTimeout time.Duration, rng *rand.Rand, devMode bool) *SimulationCore {
+func NewSimulationCore(width, height int, tickRate, decisionTimeout time.Duration, rng *rand.Rand, devMode bool) *SimulationCore {
 	outputFileName := "grid_output.txt"
-	file, err := os.OpenFile(outputFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+	file, err := os.OpenFile(outputFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		log.Fatalf("Failed to open output file %s: %v", outputFileName, err)
 	}
@@ -351,24 +349,14 @@ func (s *SimulationCore) Tick() int32 {
 	return s.tickCount
 }
 
-// PrintState writes the current state of the simulation to the output file
-func (s *SimulationCore) PrintState() {
-	gridState := s.GetGridState()
+// writeHeader writes the header information to the output file
+func (s *SimulationCore) writeHeader() error {
+	_, err := fmt.Fprintf(s.outputFile, "Tick: %s - Current Grid State & Entity Actions:\n", time.Now().Format(time.RFC3339))
+	return err
+}
 
-	_, err := s.outputFile.Seek(0, 0)
-	if err != nil {
-		log.Printf("Error seeking in output file: %v", err)
-		return
-	}
-	err = s.outputFile.Truncate(0)
-	if err != nil {
-		log.Printf("Error truncating output file: %v", err)
-		return
-	}
-
-	fmt.Fprintf(s.outputFile, "Tick: %s - Current Grid State & Entity Actions:\n", time.Now().Format(time.RFC3339))
-
-	// Create a grid representation
+// createGridRepresentation creates a string grid representation with entities
+func (s *SimulationCore) createGridRepresentation(gridState shared.GridState) [][]string {
 	grid := make([][]string, s.Grid.Height)
 	for y := 0; y < s.Grid.Height; y++ {
 		grid[y] = make([]string, s.Grid.Width)
@@ -385,29 +373,79 @@ func (s *SimulationCore) PrintState() {
 		}
 	}
 
-	// Print grid (top to bottom)
+	return grid
+}
+
+// writeGridToFile writes the grid representation to the output file
+func (s *SimulationCore) writeGridToFile(grid [][]string) error {
 	for y := s.Grid.Height - 1; y >= 0; y-- {
 		for x := 0; x < s.Grid.Width; x++ {
-			fmt.Fprint(s.outputFile, grid[y][x])
+			if _, err := fmt.Fprint(s.outputFile, grid[y][x]); err != nil {
+				return err
+			}
 			if x < s.Grid.Width-1 {
-				fmt.Fprint(s.outputFile, " ")
+				if _, err := fmt.Fprint(s.outputFile, " "); err != nil {
+					return err
+				}
 			}
 		}
-		fmt.Fprintln(s.outputFile)
+		if _, err := fmt.Fprintln(s.outputFile); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeEntityStats writes entity decision statistics to the output file
+func (s *SimulationCore) writeEntityStats(gridState shared.GridState) error {
+	if _, err := fmt.Fprintln(s.outputFile, "\nEntity Decision Times:"); err != nil {
+		return err
 	}
 
-	// Add entity decision statistics
-	fmt.Fprintln(s.outputFile, "\nEntity Decision Times:")
 	for _, entity := range gridState.Entities {
 		status := "idle"
 		if entity.IsDeciding {
 			status = "DECIDING"
 		}
-		fmt.Fprintf(s.outputFile, "Entity %d: %v (%s)\n", entity.ID, entity.LastDecisionTime, status)
+		if _, err := fmt.Fprintf(s.outputFile, "Entity %d: %v (%s)\n", entity.ID, entity.LastDecisionTime, status); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PrintState writes the current state of the simulation to the output file
+func (s *SimulationCore) PrintState() {
+	gridState := s.GetGridState()
+
+	if _, err := s.outputFile.Seek(0, 0); err != nil {
+		log.Printf("Error seeking in output file: %v", err)
+		return
 	}
 
-	err = s.outputFile.Sync()
-	if err != nil {
+	if err := s.outputFile.Truncate(0); err != nil {
+		log.Printf("Error truncating output file: %v", err)
+		return
+	}
+
+	if err := s.writeHeader(); err != nil {
+		log.Printf("Error writing header: %v", err)
+		return
+	}
+
+	grid := s.createGridRepresentation(gridState)
+
+	if err := s.writeGridToFile(grid); err != nil {
+		log.Printf("Error writing grid: %v", err)
+		return
+	}
+
+	if err := s.writeEntityStats(gridState); err != nil {
+		log.Printf("Error writing entity stats: %v", err)
+		return
+	}
+
+	if err := s.outputFile.Sync(); err != nil {
 		log.Printf("Error syncing output file: %v", err)
 	}
 }
@@ -418,6 +456,8 @@ func (s *SimulationCore) Stop() {
 
 	if s.outputFile != nil {
 		log.Printf("Closing output file: %s", s.outputFile.Name())
-		s.outputFile.Close()
+		if err := s.outputFile.Close(); err != nil {
+			log.Printf("Error closing output file: %v", err)
+		}
 	}
 }

@@ -1,0 +1,112 @@
+run:
+  timeout: 5m
+  go: "1.23"
+
+linters-settings:
+  govet:
+    enable:
+      - shadow
+    settings:
+      printf:
+        funcs:
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Infof
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Warnf
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Errorf
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Fatalf
+
+  gocyclo:
+    min-complexity: 15
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport # https://github.com/go-critic/go-critic/issues/845
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+
+  gofumpt: {}
+
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+
+  revive:
+    rules:
+      - name: unused-parameter
+        disabled: true
+      - name: var-naming
+        arguments: [["ID"], ["VM"]]
+
+linters:
+  disable-all: true
+  enable:
+    - bodyclose
+    - dogsled
+    - dupl
+    - errcheck
+    - errorlint
+    - copyloopvar
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - gofumpt
+    - mnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - revive
+    - staticcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+
+issues:
+  exclude-dirs:
+    - bin
+    - vendor
+  exclude-files:
+    - ".*\\.pb\\.go$"
+    - ".*_pb2\\.py$"
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - mnd
+        - goconst
+        - gosec
+    - path: \.go$
+      linters:
+        - mnd
+    - linters:
+        - gosec
+      text: "G404:"  # Use of weak random number generator (math/rand instead of crypto/rand)
+    - linters:
+        - revive
+      text: "exported:"
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true

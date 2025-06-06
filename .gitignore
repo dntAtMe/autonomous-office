@@ -24,6 +24,7 @@ go.work
 *.swp
 *~
 *.txt
+!cmd/entity-client/prompt_template.txt
 *.json
 # OS specific files
 .DS_Store
@@ -36,4 +37,16 @@ Thumbs.db
 tmp/
 
 # Log files
-*.log 
+*.log
+
+# Coverage reports
+coverage.out
+coverage.html
+*.cover
+
+# Linting cache
+.golangci-lint-cache/
+
+# Build artifacts
+*.tar.gz
+*.zip
