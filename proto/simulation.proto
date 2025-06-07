@@ -32,11 +32,17 @@ message EntityState {
   bool is_deciding = 5;
 }
 
+// Cell represents a single cell in the grid
+message Cell {
+  Position position = 1;
+  EntityState occupant = 2;
+}
+
 // GridState represents the current state of the simulation grid
 message GridState {
   int32 width = 1;
   int32 height = 2;
-  repeated EntityState entities = 3;
+  repeated Cell cells = 3;
 }
 
 // EntityRegistrationRequest represents a request to register an entity
@@ -78,16 +84,16 @@ message HealthResponse {
 service SimulationService {
   // Register an entity in the simulation
   rpc RegisterEntity(EntityRegistrationRequest) returns (EntityRegistrationResponse);
-  
+
   // Request a decision from an entity
   rpc RequestDecision(EntityDecisionRequest) returns (EntityDecisionResponse);
-  
+
   // Get current grid state
   rpc GetGridState(Empty) returns (GridState);
-  
+
   // Health check
   rpc HealthCheck(Empty) returns (HealthResponse);
-  
+
   // Bidirectional streaming for real-time communication
   rpc EntityStream(stream EntityDecisionResponse) returns (stream EntityDecisionRequest);
-} 
+}

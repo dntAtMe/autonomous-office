@@ -20,7 +20,7 @@ func pbPositionToShared(pos *pb.Position) shared.Position {
 	if pos == nil {
 		return shared.Position{}
 	}
-	return shared.Position{X: int(pos.X), Y: int(pos.Y)}
+	return shared.Position{X: pos.X, Y: pos.Y}
 }
 
 func sharedPositionToPb(pos shared.Position) *pb.Position {
@@ -40,6 +40,16 @@ func sharedPositionToPb(pos shared.Position) *pb.Position {
 	}
 
 	return &pb.Position{X: int32(x), Y: int32(y)} //nolint:gosec // Overflow protection above
+}
+
+func sharedEntityStateToPb(entity shared.EntityInterface) *pb.EntityState {
+	return &pb.EntityState{
+		Id:                   entity.GetID(),
+		Position:             sharedPositionToPb(entity.GetPosition()),
+		DecidedActionDisplay: entity.GetDecidedActionDisplay(),
+		LastDecisionTimeNs:   entity.GetLastDecisionTime().Nanoseconds(),
+		IsDeciding:           entity.IsDeciding(),
+	}
 }
 
 func pbActionToShared(action *pb.Action) shared.Action {
@@ -134,44 +144,18 @@ func (s *GRPCSimulationServer) RequestDecision(ctx context.Context, req *pb.Enti
 func (s *GRPCSimulationServer) GetGridState(ctx context.Context, req *pb.Empty) (*pb.GridState, error) {
 	gridState := s.core.GetGridState()
 
-	entities := make([]*pb.EntityState, 0, len(gridState.Entities))
-	for _, entity := range gridState.Entities {
-		// Check for overflow before converting
-		entityID := entity.ID
-		if entityID > math.MaxInt32 {
-			entityID = math.MaxInt32
-		} else if entityID < math.MinInt32 {
-			entityID = math.MinInt32
-		}
-
-		entities = append(entities, &pb.EntityState{
-			Id:                   int32(entityID), //nolint:gosec // Overflow protection above
-			Position:             sharedPositionToPb(entity.Position),
-			DecidedActionDisplay: entity.DecidedActionDisplay,
-			LastDecisionTimeNs:   entity.LastDecisionTime.Nanoseconds(),
-			IsDeciding:           entity.IsDeciding,
+	cells := make([]*pb.Cell, 0, gridState.Width*gridState.Height)
+	for _, cell := range gridState.Cells {
+		cells = append(cells, &pb.Cell{
+			Position: sharedPositionToPb(cell.Position),
+			Occupant: sharedEntityStateToPb(cell.Occupant),
 		})
 	}
 
-	// Check for overflow before converting grid dimensions
-	width := gridState.Width
-	if width > math.MaxInt32 {
-		width = math.MaxInt32
-	} else if width < math.MinInt32 {
-		width = math.MinInt32
-	}
-
-	height := gridState.Height
-	if height > math.MaxInt32 {
-		height = math.MaxInt32
-	} else if height < math.MinInt32 {
-		height = math.MinInt32
-	}
-
 	return &pb.GridState{
-		Width:    int32(width),  //nolint:gosec // Overflow protection above
-		Height:   int32(height), //nolint:gosec // Overflow protection above
-		Entities: entities,
+		Width:  int32(gridState.Width),
+		Height: int32(gridState.Height),
+		Cells:  cells,
 	}, nil
 }
 

@@ -407,11 +407,22 @@ func (e *EntityClient) callDevDecision(moves []*pb.Position) *pb.Position {
 }
 
 func (e *EntityClient) loadPromptTemplate(gridState *pb.GridState) (string, error) {
+	if gridState == nil {
+		log.Fatalf("gridState is nil")
+	}
+
+	entities := make([]*pb.EntityState, 0, len(gridState.Cells))
+	for _, cell := range gridState.Cells {
+		if cell.Occupant != nil {
+			entities = append(entities, cell.Occupant)
+		}
+	}
+
 	promptData := PromptData{
 		EntityID:   e.ID,
 		GridWidth:  gridState.Width,
 		GridHeight: gridState.Height,
-		Entities:   gridState.Entities,
+		Entities:   entities,
 	}
 
 	var prompt bytes.Buffer

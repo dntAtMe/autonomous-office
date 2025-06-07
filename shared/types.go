@@ -7,8 +7,8 @@ import "time"
 
 // Position represents a 2D coordinate on the grid
 type Position struct {
-	X int `json:"x"`
-	Y int `json:"y"`
+	X int32 `json:"x"`
+	Y int32 `json:"y"`
 }
 
 // ActionType defines the type of action an entity can take
@@ -26,9 +26,45 @@ type Action struct {
 	EntityID  int        `json:"entity_id"`
 }
 
+// EntityInterface defines what any entity must implement
+type EntityInterface interface {
+	GetID() int32
+	GetPosition() Position
+	SetPosition(pos Position)
+	GetDecidedActionDisplay() string
+	SetDecidedActionDisplay(display string)
+	GetLastDecisionTime() time.Duration
+	SetLastDecisionTime(duration time.Duration)
+	IsDeciding() bool
+	SetDeciding(deciding bool)
+}
+
+// Cell represents a single cell in the grid that can contain entities
+type Cell struct {
+	Position Position
+	Occupant EntityInterface
+}
+
+// IsOccupied checks if this cell is currently occupied
+func (c *Cell) IsOccupied() bool {
+	return c.Occupant != nil
+}
+
+// OnEnter handles an entity entering this cell
+func (c *Cell) OnEnter(entity EntityInterface) {
+	c.Occupant = entity
+}
+
+// OnExit handles an entity exiting this cell
+func (c *Cell) OnExit(entity EntityInterface) {
+	if entity.GetID() == c.Occupant.GetID() {
+		c.Occupant = nil
+	}
+}
+
 // EntityState represents the current state of an entity
 type EntityState struct {
-	ID                   int           `json:"id"`
+	ID                   int32         `json:"id"`
 	Position             Position      `json:"position"`
 	DecidedActionDisplay string        `json:"decided_action_display"`
 	LastDecisionTime     time.Duration `json:"last_decision_time"`
@@ -37,9 +73,9 @@ type EntityState struct {
 
 // GridState represents the current state of the simulation grid
 type GridState struct {
-	Width    int           `json:"width"`
-	Height   int           `json:"height"`
-	Entities []EntityState `json:"entities"`
+	Width  int32  `json:"width"`
+	Height int32  `json:"height"`
+	Cells  []Cell `json:"cells"`
 }
 
 // EventType defines the type of events that can occur in the simulation

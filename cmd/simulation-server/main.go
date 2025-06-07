@@ -82,9 +82,9 @@ func main() {
 
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(map[string]interface{}{
-				"width":    gridState.Width,
-				"height":   gridState.Height,
-				"entities": len(gridState.Entities),
+				"width":  gridState.Width,
+				"height": gridState.Height,
+				"cells":  len(gridState.Cells),
 			}); err != nil {
 				log.Printf("Failed to encode JSON response: %v", err)
 				// Note: Cannot send error response as headers are already written
