@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"math"
 	"math/rand"
 	"simulation/shared"
 	"sync"
@@ -24,22 +23,7 @@ func pbPositionToShared(pos *pb.Position) shared.Position {
 }
 
 func sharedPositionToPb(pos shared.Position) *pb.Position {
-	// Check for overflow and clamp values
-	x := pos.X
-	if x > math.MaxInt32 {
-		x = math.MaxInt32
-	} else if x < math.MinInt32 {
-		x = math.MinInt32
-	}
-
-	y := pos.Y
-	if y > math.MaxInt32 {
-		y = math.MaxInt32
-	} else if y < math.MinInt32 {
-		y = math.MinInt32
-	}
-
-	return &pb.Position{X: int32(x), Y: int32(y)} //nolint:gosec // Overflow protection above
+	return &pb.Position{X: pos.X, Y: pos.Y}
 }
 
 func sharedEntityStateToPb(entity shared.EntityInterface) *pb.EntityState {
@@ -153,8 +137,8 @@ func (s *GRPCSimulationServer) GetGridState(ctx context.Context, req *pb.Empty) 
 	}
 
 	return &pb.GridState{
-		Width:  int32(gridState.Width),
-		Height: int32(gridState.Height),
+		Width:  gridState.Width,
+		Height: gridState.Height,
 		Cells:  cells,
 	}, nil
 }
