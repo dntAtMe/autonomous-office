@@ -325,7 +325,7 @@ func (s *SimulationCore) createGridRepresentation(gridState shared.GridState) []
 
 	// Place entities on the grid
 	for _, cell := range gridState.Cells {
-		if cell.Position.Y >= 0 && cell.Position.Y < s.Grid.Height &&
+		if cell.Occupant != nil && cell.Position.Y >= 0 && cell.Position.Y < s.Grid.Height &&
 			cell.Position.X >= 0 && cell.Position.X < s.Grid.Width {
 			grid[cell.Position.Y][cell.Position.X] = fmt.Sprintf("E%d[%s] ", cell.Occupant.GetID(), cell.Occupant.GetDecidedActionDisplay())
 		}
@@ -361,9 +361,12 @@ func (s *SimulationCore) writeEntityStats(gridState shared.GridState) error {
 	}
 
 	for _, cell := range gridState.Cells {
+		if cell.Occupant == nil {
+			continue
+		}
 		status := "idle"
 		if cell.Occupant.IsDeciding() {
-			status = "DECIDING"
+			status = "deciding"
 		}
 		if _, err := fmt.Fprintf(s.outputFile, "Entity %d: %v (%s)\n", cell.Occupant.GetID(), cell.Occupant.GetLastDecisionTime(), status); err != nil {
 			return err

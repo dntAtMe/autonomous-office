@@ -57,7 +57,7 @@ func (c *Cell) OnEnter(entity EntityInterface) {
 
 // OnExit handles an entity exiting this cell
 func (c *Cell) OnExit(entity EntityInterface) {
-	if entity.GetID() == c.Occupant.GetID() {
+	if c.Occupant != nil && entity.GetID() == c.Occupant.GetID() {
 		c.Occupant = nil
 	}
 }
