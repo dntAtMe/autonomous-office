@@ -62,15 +62,6 @@ func (c *Cell) OnExit(entity EntityInterface) {
 	}
 }
 
-// EntityState represents the current state of an entity
-type EntityState struct {
-	ID                   int32         `json:"id"`
-	Position             Position      `json:"position"`
-	DecidedActionDisplay string        `json:"decided_action_display"`
-	LastDecisionTime     time.Duration `json:"last_decision_time"`
-	IsDeciding           bool          `json:"is_deciding"`
-}
-
 // GridState represents the current state of the simulation grid
 type GridState struct {
 	Width  int32  `json:"width"`
