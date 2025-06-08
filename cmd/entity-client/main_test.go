@@ -21,10 +21,13 @@ func TestLoadPromptTemplate(t *testing.T) {
 			gridState: &pb.GridState{
 				Width:  3,
 				Height: 3,
-				Entities: []*pb.EntityState{
+				Cells: []*pb.Cell{
 					{
-						Id:       1,
 						Position: &pb.Position{X: 1, Y: 1},
+						Occupant: &pb.EntityState{
+							Id:       1,
+							Position: &pb.Position{X: 1, Y: 1},
+						},
 					},
 				},
 			},
@@ -41,18 +44,27 @@ func TestLoadPromptTemplate(t *testing.T) {
 			gridState: &pb.GridState{
 				Width:  10,
 				Height: 8,
-				Entities: []*pb.EntityState{
+				Cells: []*pb.Cell{
 					{
-						Id:       1,
 						Position: &pb.Position{X: 0, Y: 0},
+						Occupant: &pb.EntityState{
+							Id:       1,
+							Position: &pb.Position{X: 0, Y: 0},
+						},
 					},
 					{
-						Id:       2,
 						Position: &pb.Position{X: 5, Y: 3},
+						Occupant: &pb.EntityState{
+							Id:       2,
+							Position: &pb.Position{X: 5, Y: 3},
+						},
 					},
 					{
-						Id:       3,
 						Position: &pb.Position{X: 9, Y: 7},
+						Occupant: &pb.EntityState{
+							Id:       3,
+							Position: &pb.Position{X: 9, Y: 7},
+						},
 					},
 				},
 			},
@@ -70,10 +82,13 @@ func TestLoadPromptTemplate(t *testing.T) {
 			gridState: &pb.GridState{
 				Width:  5,
 				Height: 5,
-				Entities: []*pb.EntityState{
+				Cells: []*pb.Cell{
 					{
-						Id:       0,
 						Position: &pb.Position{X: 2, Y: 2},
+						Occupant: &pb.EntityState{
+							Id:       0,
+							Position: &pb.Position{X: 2, Y: 2},
+						},
 					},
 				},
 			},
@@ -89,12 +104,42 @@ func TestLoadPromptTemplate(t *testing.T) {
 			gridState: &pb.GridState{
 				Width:  100,
 				Height: 50,
-				Entities: []*pb.EntityState{
-					{Id: 1, Position: &pb.Position{X: 10, Y: 20}},
-					{Id: 2, Position: &pb.Position{X: 30, Y: 40}},
-					{Id: 3, Position: &pb.Position{X: 50, Y: 25}},
-					{Id: 4, Position: &pb.Position{X: 70, Y: 35}},
-					{Id: 5, Position: &pb.Position{X: 90, Y: 45}},
+				Cells: []*pb.Cell{
+					{
+						Position: &pb.Position{X: 10, Y: 20},
+						Occupant: &pb.EntityState{
+							Id:       1,
+							Position: &pb.Position{X: 10, Y: 20},
+						},
+					},
+					{
+						Position: &pb.Position{X: 30, Y: 40},
+						Occupant: &pb.EntityState{
+							Id:       2,
+							Position: &pb.Position{X: 30, Y: 40},
+						},
+					},
+					{
+						Position: &pb.Position{X: 50, Y: 25},
+						Occupant: &pb.EntityState{
+							Id:       3,
+							Position: &pb.Position{X: 50, Y: 25},
+						},
+					},
+					{
+						Position: &pb.Position{X: 70, Y: 35},
+						Occupant: &pb.EntityState{
+							Id:       4,
+							Position: &pb.Position{X: 70, Y: 35},
+						},
+					},
+					{
+						Position: &pb.Position{X: 90, Y: 45},
+						Occupant: &pb.EntityState{
+							Id:       5,
+							Position: &pb.Position{X: 90, Y: 45},
+						},
+					},
 				},
 			},
 			expectText: []string{
@@ -111,9 +156,14 @@ func TestLoadPromptTemplate(t *testing.T) {
 			name:     "Empty entities list",
 			entityID: 1,
 			gridState: &pb.GridState{
-				Width:    2,
-				Height:   2,
-				Entities: []*pb.EntityState{},
+				Width:  2,
+				Height: 2,
+				Cells: []*pb.Cell{
+					{
+						Position: &pb.Position{X: 0, Y: 0},
+						Occupant: nil,
+					},
+				},
 			},
 			expectText: []string{
 				"You are entity 1 in a 2x2 grid simulation",
@@ -127,9 +177,21 @@ func TestLoadPromptTemplate(t *testing.T) {
 			gridState: &pb.GridState{
 				Width:  5,
 				Height: 5,
-				Entities: []*pb.EntityState{
-					{Id: 1, Position: &pb.Position{X: 1, Y: 1}},
-					{Id: 2, Position: &pb.Position{X: 2, Y: 2}},
+				Cells: []*pb.Cell{
+					{
+						Position: &pb.Position{X: 1, Y: 1},
+						Occupant: &pb.EntityState{
+							Id:       1,
+							Position: &pb.Position{X: 1, Y: 1},
+						},
+					},
+					{
+						Position: &pb.Position{X: 2, Y: 2},
+						Occupant: &pb.EntityState{
+							Id:       2,
+							Position: &pb.Position{X: 2, Y: 2},
+						},
+					},
 				},
 			},
 			expectText: []string{
@@ -145,9 +207,21 @@ func TestLoadPromptTemplate(t *testing.T) {
 			gridState: &pb.GridState{
 				Width:  10,
 				Height: 10,
-				Entities: []*pb.EntityState{
-					{Id: 1, Position: &pb.Position{X: -1, Y: -2}},
-					{Id: 2, Position: &pb.Position{X: 0, Y: 0}},
+				Cells: []*pb.Cell{
+					{
+						Position: &pb.Position{X: -1, Y: -2},
+						Occupant: &pb.EntityState{
+							Id:       1,
+							Position: &pb.Position{X: -1, Y: -2},
+						},
+					},
+					{
+						Position: &pb.Position{X: 0, Y: 0},
+						Occupant: &pb.EntityState{
+							Id:       2,
+							Position: &pb.Position{X: 0, Y: 0},
+						},
+					},
 				},
 			},
 			expectText: []string{
@@ -211,10 +285,12 @@ func TestLoadPromptTemplate_NilPosition(t *testing.T) {
 	gridState := &pb.GridState{
 		Width:  5,
 		Height: 5,
-		Entities: []*pb.EntityState{
+		Cells: []*pb.Cell{
 			{
-				Id:       1,
 				Position: nil,
+				Occupant: &pb.EntityState{
+					Id: 1,
+				},
 			},
 		},
 	}
@@ -234,12 +310,19 @@ func BenchmarkLoadPromptTemplate(b *testing.B) {
 	gridState := &pb.GridState{
 		Width:  10,
 		Height: 10,
-		Entities: []*pb.EntityState{
-			{Id: 1, Position: &pb.Position{X: 1, Y: 1}},
-			{Id: 2, Position: &pb.Position{X: 2, Y: 2}},
-			{Id: 3, Position: &pb.Position{X: 3, Y: 3}},
-			{Id: 4, Position: &pb.Position{X: 4, Y: 4}},
-			{Id: 5, Position: &pb.Position{X: 5, Y: 5}},
+		Cells: []*pb.Cell{
+			{
+				Position: &pb.Position{X: 1, Y: 1},
+				Occupant: &pb.EntityState{
+					Id: 1,
+				},
+			},
+			{
+				Position: &pb.Position{X: 2, Y: 2},
+				Occupant: &pb.EntityState{
+					Id: 2,
+				},
+			},
 		},
 	}
 
@@ -255,7 +338,6 @@ func BenchmarkLoadPromptTemplate(b *testing.B) {
 func TestLoadPromptTemplate_ManyEntities(t *testing.T) {
 	client := &EntityClient{ID: 50}
 
-	// Create 100 entities
 	entities := make([]*pb.EntityState, 100)
 	for i := 0; i < 100; i++ {
 		entities[i] = &pb.EntityState{
@@ -264,10 +346,18 @@ func TestLoadPromptTemplate_ManyEntities(t *testing.T) {
 		}
 	}
 
+	cells := make([]*pb.Cell, 100)
+	for i := 0; i < 100; i++ {
+		cells[i] = &pb.Cell{
+			Position: &pb.Position{X: int32(i % 10), Y: int32(i / 10)},
+			Occupant: entities[i],
+		}
+	}
+
 	gridState := &pb.GridState{
-		Width:    10,
-		Height:   10,
-		Entities: entities,
+		Width:  10,
+		Height: 10,
+		Cells:  cells,
 	}
 
 	result, err := client.loadPromptTemplate(gridState)

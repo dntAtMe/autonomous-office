@@ -10,36 +10,15 @@ import (
 	"time"
 )
 
-// Cell represents a single cell in the grid that can contain entities
-type Cell struct {
-	Position shared.Position
-	Occupant *RemoteEntity
-}
-
-// IsOccupied checks if this cell is currently occupied
-func (c *Cell) IsOccupied() bool {
-	return c.Occupant != nil
-}
-
-// OnEnter handles an entity entering this cell
-func (c *Cell) OnEnter(entity *RemoteEntity) {
-	c.Occupant = entity
-}
-
-// OnExit handles an entity exiting this cell
-func (c *Cell) OnExit(_ *RemoteEntity) {
-	c.Occupant = nil
-}
-
 // Grid represents the 2D space where entities move
 type Grid struct {
-	Width  int
-	Height int
-	Cells  [][]Cell
+	Width  int32
+	Height int32
+	Cells  [][]shared.Cell
 }
 
 // GetCell returns the cell at the specified position
-func (g *Grid) GetCell(x, y int) *Cell {
+func (g *Grid) GetCell(x, y int32) *shared.Cell {
 	if x >= 0 && x < g.Width && y >= 0 && y < g.Height {
 		return &g.Cells[y][x]
 	}
@@ -80,23 +59,10 @@ func NewBaseEntity(id int32) BaseEntity {
 	}
 }
 
-// EntityInterface defines what any entity must implement
-type EntityInterface interface {
-	GetID() int32
-	GetPosition() shared.Position
-	SetPosition(pos shared.Position)
-	GetDecidedActionDisplay() string
-	SetDecidedActionDisplay(display string)
-	GetLastDecisionTime() time.Duration
-	SetLastDecisionTime(duration time.Duration)
-	IsDeciding() bool
-	SetDeciding(deciding bool)
-}
-
 // SimulationCore represents the core simulation engine that can work with any transport
 type SimulationCore struct {
 	Grid            Grid
-	Entities        map[int32]EntityInterface
+	Entities        map[int32]shared.EntityInterface
 	TickRate        time.Duration
 	DecisionTimeout time.Duration
 	Rand            *rand.Rand
@@ -108,7 +74,7 @@ type SimulationCore struct {
 }
 
 // NewSimulationCore creates a new core simulation engine
-func NewSimulationCore(width, height int, tickRate, decisionTimeout time.Duration, rng *rand.Rand, devMode bool) *SimulationCore {
+func NewSimulationCore(width, height int32, tickRate, decisionTimeout time.Duration, rng *rand.Rand, devMode bool) *SimulationCore {
 	outputFileName := "grid_output.txt"
 	file, err := os.OpenFile(outputFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -123,18 +89,18 @@ func NewSimulationCore(width, height int, tickRate, decisionTimeout time.Duratio
 		TickRate:        tickRate,
 		DecisionTimeout: decisionTimeout,
 		Rand:            rng,
-		Entities:        make(map[int32]EntityInterface),
+		Entities:        make(map[int32]shared.EntityInterface),
 		nextEntityID:    1,
 		tickCount:       0,
 		DevMode:         devMode,
 		outputFile:      file,
 	}
 
-	core.Grid.Cells = make([][]Cell, height)
-	for y := 0; y < height; y++ {
-		core.Grid.Cells[y] = make([]Cell, width)
-		for x := 0; x < width; x++ {
-			core.Grid.Cells[y][x] = Cell{
+	core.Grid.Cells = make([][]shared.Cell, height)
+	for y := int32(0); y < height; y++ {
+		core.Grid.Cells[y] = make([]shared.Cell, width)
+		for x := int32(0); x < width; x++ {
+			core.Grid.Cells[y][x] = shared.Cell{
 				Position: shared.Position{X: x, Y: y},
 			}
 		}
@@ -146,7 +112,7 @@ func NewSimulationCore(width, height int, tickRate, decisionTimeout time.Duratio
 }
 
 // RegisterEntity adds an entity to the simulation
-func (s *SimulationCore) RegisterEntity(entity EntityInterface) error {
+func (s *SimulationCore) RegisterEntity(entity shared.EntityInterface) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -154,8 +120,8 @@ func (s *SimulationCore) RegisterEntity(entity EntityInterface) error {
 	var emptyPos shared.Position
 	found := false
 	for attempts := 0; attempts < 100; attempts++ {
-		x := s.Rand.Intn(s.Grid.Width)
-		y := s.Rand.Intn(s.Grid.Height)
+		x := s.Rand.Int31n(s.Grid.Width)
+		y := s.Rand.Int31n(s.Grid.Height)
 		cell := s.Grid.GetCell(x, y)
 		if cell != nil && !cell.IsOccupied() {
 			emptyPos = shared.Position{X: x, Y: y}
@@ -176,10 +142,7 @@ func (s *SimulationCore) RegisterEntity(entity EntityInterface) error {
 	// Mark the cell as occupied
 	cell := s.Grid.GetCell(emptyPos.X, emptyPos.Y)
 	if cell != nil {
-		cell.OnEnter(&RemoteEntity{
-			ID:       int(entity.GetID()),
-			Position: emptyPos,
-		})
+		cell.OnEnter(entity)
 	}
 
 	log.Printf("Entity %d registered at position (%d, %d)", entity.GetID(), emptyPos.X, emptyPos.Y)
@@ -196,11 +159,10 @@ func (s *SimulationCore) UnregisterEntity(entityID int32) {
 		return
 	}
 
-	// Remove from grid
 	pos := entity.GetPosition()
 	cell := s.Grid.GetCell(pos.X, pos.Y)
 	if cell != nil {
-		cell.OnExit(&RemoteEntity{ID: int(entityID)})
+		cell.OnExit(entity)
 	}
 
 	// Remove from entities
@@ -229,21 +191,20 @@ func (s *SimulationCore) GetGridState() shared.GridState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	entities := make([]shared.EntityState, 0, len(s.Entities))
-	for _, entity := range s.Entities {
-		entities = append(entities, shared.EntityState{
-			ID:                   int(entity.GetID()),
-			Position:             entity.GetPosition(),
-			DecidedActionDisplay: entity.GetDecidedActionDisplay(),
-			LastDecisionTime:     entity.GetLastDecisionTime(),
-			IsDeciding:           entity.IsDeciding(),
-		})
+	cells := make([]shared.Cell, 0, s.Grid.Width*s.Grid.Height)
+	for _, row := range s.Grid.Cells {
+		for _, cell := range row {
+			cells = append(cells, shared.Cell{
+				Position: cell.Position,
+				Occupant: cell.Occupant,
+			})
+		}
 	}
 
 	return shared.GridState{
-		Width:    s.Grid.Width,
-		Height:   s.Grid.Height,
-		Entities: entities,
+		Width:  s.Grid.Width,
+		Height: s.Grid.Height,
+		Cells:  cells,
 	}
 }
 
@@ -280,7 +241,7 @@ func (s *SimulationCore) ExecuteAction(entityID int32, action shared.Action) {
 }
 
 // moveEntity attempts to move an entity in the specified direction
-func (s *SimulationCore) moveEntity(entity EntityInterface, direction shared.Position) {
+func (s *SimulationCore) moveEntity(entity shared.EntityInterface, direction shared.Position) {
 	currentPos := entity.GetPosition()
 	newX := currentPos.X + direction.X
 	newY := currentPos.Y + direction.Y
@@ -303,16 +264,13 @@ func (s *SimulationCore) moveEntity(entity EntityInterface, direction shared.Pos
 
 	currentCell := s.Grid.GetCell(currentPos.X, currentPos.Y)
 	if currentCell != nil {
-		currentCell.OnExit(&RemoteEntity{ID: int(entity.GetID())})
+		currentCell.OnExit(entity)
 	}
 
 	newPos := shared.Position{X: newX, Y: newY}
 	entity.SetPosition(newPos)
 
-	targetCell.OnEnter(&RemoteEntity{
-		ID:       int(entity.GetID()),
-		Position: newPos,
-	})
+	targetCell.OnEnter(entity)
 
 	log.Printf("moveEntity: Entity %d successfully moved to (%d, %d)",
 		entity.GetID(), newX, newY)
@@ -358,18 +316,18 @@ func (s *SimulationCore) writeHeader() error {
 // createGridRepresentation creates a string grid representation with entities
 func (s *SimulationCore) createGridRepresentation(gridState shared.GridState) [][]string {
 	grid := make([][]string, s.Grid.Height)
-	for y := 0; y < s.Grid.Height; y++ {
+	for y := int32(0); y < s.Grid.Height; y++ {
 		grid[y] = make([]string, s.Grid.Width)
-		for x := 0; x < s.Grid.Width; x++ {
+		for x := int32(0); x < s.Grid.Width; x++ {
 			grid[y][x] = ".      "
 		}
 	}
 
 	// Place entities on the grid
-	for _, entity := range gridState.Entities {
-		if entity.Position.Y >= 0 && entity.Position.Y < s.Grid.Height &&
-			entity.Position.X >= 0 && entity.Position.X < s.Grid.Width {
-			grid[entity.Position.Y][entity.Position.X] = fmt.Sprintf("E%d[%s] ", entity.ID, entity.DecidedActionDisplay)
+	for _, cell := range gridState.Cells {
+		if cell.Occupant != nil && cell.Position.Y >= 0 && cell.Position.Y < s.Grid.Height &&
+			cell.Position.X >= 0 && cell.Position.X < s.Grid.Width {
+			grid[cell.Position.Y][cell.Position.X] = fmt.Sprintf("E%d[%s] ", cell.Occupant.GetID(), cell.Occupant.GetDecidedActionDisplay())
 		}
 	}
 
@@ -379,7 +337,7 @@ func (s *SimulationCore) createGridRepresentation(gridState shared.GridState) []
 // writeGridToFile writes the grid representation to the output file
 func (s *SimulationCore) writeGridToFile(grid [][]string) error {
 	for y := s.Grid.Height - 1; y >= 0; y-- {
-		for x := 0; x < s.Grid.Width; x++ {
+		for x := int32(0); x < s.Grid.Width; x++ {
 			if _, err := fmt.Fprint(s.outputFile, grid[y][x]); err != nil {
 				return err
 			}
@@ -402,12 +360,15 @@ func (s *SimulationCore) writeEntityStats(gridState shared.GridState) error {
 		return err
 	}
 
-	for _, entity := range gridState.Entities {
-		status := "idle"
-		if entity.IsDeciding {
-			status = "DECIDING"
+	for _, cell := range gridState.Cells {
+		if cell.Occupant == nil {
+			continue
 		}
-		if _, err := fmt.Fprintf(s.outputFile, "Entity %d: %v (%s)\n", entity.ID, entity.LastDecisionTime, status); err != nil {
+		status := "idle"
+		if cell.Occupant.IsDeciding() {
+			status = "deciding"
+		}
+		if _, err := fmt.Fprintf(s.outputFile, "Entity %d: %v (%s)\n", cell.Occupant.GetID(), cell.Occupant.GetLastDecisionTime(), status); err != nil {
 			return err
 		}
 	}
