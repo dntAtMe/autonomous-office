@@ -370,18 +370,22 @@ func (e *EntityClient) handleDecisionLoop() error {
 func (e *EntityClient) makeDecision(request *pb.EntityDecisionRequest) *pb.Action {
 	log.Printf("Entity %d making decision", e.ID)
 
-	possibleMoves := []*pb.Position{
-		{X: 0, Y: 1},  // Up
-		{X: 0, Y: -1}, // Down
-		{X: 1, Y: 0},  // Right
-		{X: -1, Y: 0}, // Left
-	}
-
 	var direction *pb.Position
 
 	switch {
 	case e.DevMode:
-		direction = e.callDevDecision(possibleMoves)
+		// In dev mode, we can further choose between manual and automated decisions
+		if manualFlag {
+			direction = e.getManualInput()
+		} else {
+			possibleMoves := []*pb.Position{
+				{X: 0, Y: 1},  // Up
+				{X: 0, Y: -1}, // Down
+				{X: 1, Y: 0},  // Right
+				{X: -1, Y: 0}, // Left
+			}
+			direction = e.callDevDecision(possibleMoves)
+		}
 	default:
 		direction = e.callGeminiForDecision(request.GridState)
 	}
@@ -393,6 +397,28 @@ func (e *EntityClient) makeDecision(request *pb.EntityDecisionRequest) *pb.Actio
 	}
 
 	return action
+}
+
+// getManualInput prompts the user for a move and returns the corresponding position
+func (e *EntityClient) getManualInput() *pb.Position {
+	fmt.Printf("Enter move for entity %d (U, D, L, R): ", e.ID)
+	var input string
+	fmt.Scanln(&input)
+	input = strings.ToUpper(strings.TrimSpace(input))
+
+	switch input {
+	case "U":
+		return &pb.Position{X: 0, Y: 1}
+	case "D":
+		return &pb.Position{X: 0, Y: -1}
+	case "L":
+		return &pb.Position{X: -1, Y: 0}
+	case "R":
+		return &pb.Position{X: 1, Y: 0}
+	default:
+		log.Printf("Invalid input, defaulting to no move")
+		return &pb.Position{X: 0, Y: 0}
+	}
 }
 
 // callDevDecision is a development mode function that returns a random direction
@@ -499,15 +525,24 @@ func (e *EntityClient) callGeminiForDecision(gridState *pb.GridState) *pb.Positi
 	}
 }
 
+var manualFlag bool
+
 func main() {
 	// Parse command line flags
 	devModePtr := flag.Bool("dev", true, "Run in development mode")
 	serverURLPtr := flag.String("server", "simulation-server-service:9090", "Simulation server URL (gRPC)")
 	numEntitiesPtr := flag.Int("entities", defaultEntitiesCount, "Number of entities to create")
+	manualPtr := flag.Bool("manual", false, "Enable manual input for entities in dev mode")
 	flag.Parse()
+
+	manualFlag = *manualPtr
 
 	if *devModePtr {
 		log.Println("Running in development mode")
+	}
+
+	if manualFlag && !*devModePtr {
+		log.Fatal("Manual mode is only available in dev mode")
 	}
 
 	log.Printf("Creating %d entities to connect to gRPC server at %s", *numEntitiesPtr, *serverURLPtr)
