@@ -27,6 +27,10 @@ func sharedPositionToPb(pos shared.Position) *pb.Position {
 }
 
 func sharedEntityStateToPb(entity shared.EntityInterface) *pb.EntityState {
+	if entity == nil {
+		return nil
+	}
+
 	return &pb.EntityState{
 		Id:                   entity.GetID(),
 		Position:             sharedPositionToPb(entity.GetPosition()),
@@ -130,9 +134,14 @@ func (s *GRPCSimulationServer) GetGridState(ctx context.Context, req *pb.Empty) 
 
 	cells := make([]*pb.Cell, 0, gridState.Width*gridState.Height)
 	for _, cell := range gridState.Cells {
+		var occupant *pb.EntityState
+		if cell.Occupant != nil {
+			occupant = sharedEntityStateToPb(cell.Occupant)
+		}
+
 		cells = append(cells, &pb.Cell{
 			Position: sharedPositionToPb(cell.Position),
-			Occupant: sharedEntityStateToPb(cell.Occupant),
+			Occupant: occupant,
 		})
 	}
 
@@ -179,7 +188,13 @@ func (s *GRPCSimulationServer) EntityStream(stream pb.SimulationService_EntitySt
 		s.streamsMu.Lock()
 		delete(s.entityStreams, entityID)
 		s.streamsMu.Unlock()
-		log.Printf("Entity stream for entity %d deregistered", entityID)
+		s.timingMu.Lock()
+		delete(s.decisionStartTimes, entityID)
+		s.timingMu.Unlock()
+
+		s.core.UnregisterEntity(entityID)
+
+		log.Printf("Entity stream for entity %d deregistered and entity unregistered", entityID)
 	}()
 
 	// Loop to receive decisions from the client
