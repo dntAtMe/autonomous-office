@@ -494,12 +494,42 @@ func (e *EntityClient) callGeminiForDecision(gridState *pb.GridState) *pb.Positi
 		return &pb.Position{X: 0, Y: 0}
 	}
 
+	tools := []*genai.Tool{
+		{
+			FunctionDeclarations: []*genai.FunctionDeclaration{
+				{
+					Name:        "get_direction",
+					Description: "Get the direction to move in",
+					Parameters: &genai.Schema{
+						Type: "object",
+						Properties: map[string]*genai.Schema{
+							"direction": {
+								Type: "string",
+								Enum: []string{"U", "D", "L", "R"},
+							},
+						},
+						Required: []string{"direction"},
+					},
+					Response: &genai.Schema{
+						Type: "object",
+					},
+				},
+			},
+		},
+	}
+
 	result, err := client.Models.GenerateContent(
 		ctx,
-		"gemini-2.0-flash",
+		"gemini-2.5-flash-lite",
 		genai.Text(prompt),
 		&genai.GenerateContentConfig{
 			Temperature: &temperature,
+			ToolConfig: &genai.ToolConfig{
+				FunctionCallingConfig: &genai.FunctionCallingConfig{
+					Mode: genai.FunctionCallingConfigModeAny,
+				},
+			},
+			Tools: tools,
 		},
 	)
 	if err != nil {
@@ -507,11 +537,12 @@ func (e *EntityClient) callGeminiForDecision(gridState *pb.GridState) *pb.Positi
 		return &pb.Position{X: 0, Y: 0}
 	}
 
-	response := result.Text()
-	response = strings.TrimSpace(response)
-	log.Printf("Gemini response: %s", response)
+	arguments := result.FunctionCalls()[0].Args
+	log.Printf("Gemini response: %s", arguments)
 
-	switch response {
+	direction := arguments["direction"].(string)
+
+	switch direction {
 	case "U":
 		return &pb.Position{X: 0, Y: 1}
 	case "D":
