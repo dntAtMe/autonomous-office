@@ -486,7 +486,9 @@ func (e *EntityClient) callGeminiForDecision(gridState *pb.GridState) *pb.Positi
 		return &pb.Position{X: 0, Y: 0}
 	}
 
-	temperature := float32(1.0)
+	temperature := float32(2.0)
+	topK := float32(1.0)
+	topP := float32(1.0)
 
 	prompt, err := e.loadPromptTemplate(gridState)
 	if err != nil {
@@ -530,6 +532,8 @@ func (e *EntityClient) callGeminiForDecision(gridState *pb.GridState) *pb.Positi
 				},
 			},
 			Tools: tools,
+			TopK:  &topK,
+			TopP:  &topP,
 		},
 	)
 	if err != nil {
